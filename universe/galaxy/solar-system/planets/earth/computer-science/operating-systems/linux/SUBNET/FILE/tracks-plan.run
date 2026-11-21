@@ -1,0 +1,2224 @@
+title start
+name: title-tracks-plan
+kind: note
+tags: runfile tracks plan routines
+Tracks plan: mark, walk, level, chain
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+chapter start
+name: section-tp-vision
+title start
+name: title-tp-vision
+Vision: the ecosystem turns knowledge into practice
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-vision-purpose
+The ecosystem does not only map information. Its main purpose is
+to turn what is written into something lived: a routine, a testing
+field, a learning path. Tracks are where this happens, so they are
+a core feature of the whole system and not an add-on.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-vision-whole
+Every decision here is made for the whole ecosystem: runfile,
+editor, shell, server and web page. A track touches all of them,
+so no module is planned alone.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-vision-changes
+Expect changes outside this plan: the runfile formatting, the
+marks, the block types, the index and the server commands. The web
+page needs new features too: a live checklist, a walk view, level
+and progress views. Each change is decided here before it is built.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-vision-method
+Method: sets of about twenty questions with options, each set
+labeled with how advanced it is. Answers are written into this page
+at once. Building starts only when the plan is closed.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-d1
+title start
+name: title-tp-d1
+Decisions, set 1: foundations
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+
+paragraph start
+name: paragraph-d1-mark-form
+Marks. What: a mark is a declaration on any block, for example
+mark: rule. Why: the text and the style stay untouched, and the
+index can read the mark as data. Drawn: inside the line of the
+block, on the right side, always visible, in reading mode and in
+writing mode.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-mark-many
+Several marks. A block may carry any number of marks and all stay
+visible. One mark sits on the right of the first line. Several
+marks sit on the bottom line of the block, inside it. Example: a
+block marked rule, step and card shows all three at the bottom.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-mark-scope
+What can be marked: a file, a chapter, any block type and a whole
+directory. Chapter and block marks are declarations. File and
+directory marks are made in layout files, which list the files or
+directories they mark. Why: a layout already groups files. This
+part needs its own planning.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-link
+One rule for everything: linked, never copied. A mark, a step and
+a chain point at the original through the linking system. Why: one
+edit at the source reaches every place that uses it. When the
+source is renamed the server rewrites every link at once, so
+nothing breaks and no manual fix exists.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-d1-steps
+Steps. A step has a title and a description of its own and a link
+to the original block, so one key opens the original file. Why: you
+may forget the details and must be able to read the source without
+losing your place. Timers, pauses and repeats inside a step are
+planned in their own chapter.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-levels
+Levels are numbers. A level is raised or lowered by hand: by him,
+or by the AI when he asks. There is no automatic rule. Why: a level
+is a decision about the person, not a count.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-order
+Order. No step is missed or dropped. Steps stay in one straight
+chronological line. Why: that order is the point of the feature.
+Skip and snooze exist, but they are actions he takes, recorded in
+the step, never silent.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-time
+Time model: unlimited. Fixed clock, relative to the last step,
+sun based, month, year and decade based, and any later kind. Each
+kind is added without changing the others. Example: every hour at
+:00 and also 45 minutes after the last done, in one track.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-progress
+Progress lives in the step itself, in the file of the track, for
+every kind of use: checklist, routine, spaced repetition, forced
+recurrent repetition. A step can progress and regress. The
+original block is never changed.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-d1-surfaces
+Where it shows: the server, the shell, the multiplexer at start
+and a new box in his own dashboard. No phone alerts now. The web
+page is the main place for graphics. The editor works on the same
+files and both stay in sync. Each track also has a page, a file.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-walk
+The walk is modular, with parts combined and changed live. Pause
+stops the timer without stopping the chain. He can jump to the
+original block, read, and return to the same place.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-actions
+Actions on a step: done, skip, back, pause, snooze, add time,
+lower time and swap. Each can be switched on or off. All of it is
+editable from the file, from the web page and from a menu in the
+settings TUI, and the three stay in sync.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-measures
+Measures. Any step may count anything: reps, minutes, a timer, a
+wait, a pause. One generic measure with a unit, never a fixed
+list. Example: 25 push-ups, 30 s rest, 5 min stretch.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-plan-order
+Order of planning: first the master plan with every question, then
+the chronological build order, then practice. No view is ranked
+first yet.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-web
+The web gets a new interface later, in the family of the
+multiplexer, the editor, the dashboards and the settings TUI. It
+needs its own plan because it is one of the main features.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d1-readme
+README: changed only after the whole plan is closed. Then its
+structure is decided. It must cover every feature and be
+understandable alone.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-d2
+title start
+name: title-tp-d2
+Decisions, set 2: structure and surfaces
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+
+paragraph start
+name: paragraph-d2-marks-syntax
+Several marks in one declaration are separated by commas, for
+example mark: rule, step, card. Why: one line, easy to read and to
+edit. Example: a block marked rule and check carries both.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-mark-kinds
+Mark kinds work like block types. The built-in kinds are files in
+the default runfile folder. Users add their own kinds in the
+nearest .runfile subfolder, which adds on top of the default one.
+Why: a new kind needs no code and no copy of the defaults.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-layout-marks
+Marking files and directories. A layout file may hold a mark block
+and may mark the title of a file it links, which marks that file. A
+file can also be marked inside itself. Why: a layout card is already
+a link to the real file, so the mark follows the link.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+
+paragraph start
+name: paragraph-d2-progress-scope
+Progress belongs to the part it measures. A day holds several
+chains, a chain holds several steps, and each one has its own
+progress. Why: a day can be done while one chain is half done.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-ai
+The AI may change anything in these files when he asks: steps,
+levels, times, chains and marks. The branch history is the record
+and the way back.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-modular
+Everything is modular and combines freely. Repeat kinds, time
+kinds, timer kinds, pauses and measures are parts that nest in any
+order. Example: a repeat inside a timer, with a pause inside the
+repeat. Planned repeats: N times, every N minutes until a time,
+spaced repetition, forced recurrence. Planned timers: countdown,
+countup, interval work and rest, wait until a clock time, and more
+later. New kinds are added without changing the others.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-measure
+A measure may hold a number, a unit, a target, a tolerance, a
+history and a formula between measures. Why: reps, minutes, weight
+and waits are all the same thing with a different unit.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-regress
+Regress is modular. It can go back in time by a bigger or smaller
+amount, back one level, or back more, and each step may define its
+own rule. A rule has a trigger and an amount, both set by him.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-chains
+Chain, include and parallel all exist and each is a part of its
+own. Why: a day is a chain, a body routine is an include and the
+hourly and daily tracks run in parallel. If the same step comes
+twice in one chain it shows twice, and only a program removes it.
+Why: a repeat is there for a reason.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-server
+The editor, the runfile system and the web page all work through
+the server and never alone. The web page has as much control as the
+editor, with a defined interface, plus and minus controls instead
+of typing. Its own plan comes after the fundamentals.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-tui
+The settings TUI gets a menu for this feature. It can change
+levels, repeats, times and combine chains, so most work needs no
+file edit. The other ways are the files, the AI and the web page.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-dashboard
+The dashboard box shows a lot of information and is one of the
+last things built. The multiplexer start screen is undecided.
+Build order: fundamentals, then the web interface, then the
+dashboard.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+
+
+paragraph start
+name: paragraph-d2-amplifier
+Amplifier. One schema read from the block type files could draw
+the form in the file, the settings TUI and the web page, so the
+three never drift apart. To be decided.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d2-stale
+Stale text. The older chapters still say track, log and shows once.
+They are rewritten when the plan closes, never before.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-d3
+title start
+name: title-tp-d3
+Decisions, set 3: storage and speed
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-d3-worktree
+Track files live in a git worktree: a second folder of the same
+repo with its own branch, so both trees are always on disk. The
+index loads both folders and links work by name, not by path.
+Reading two trees is cheap. Why not a plain branch: a checkout
+would swap the files and the track files would vanish.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d3-server
+The server is part of the ecosystem and first class. Everything
+goes through it. There is no offline mode to plan for.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-d3-chain-end
+A chain ends only when he stops it. The commit happens on that
+stop. This also covers a year or a parallel chain, which never end
+by themselves.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-d4
+title start
+name: title-tp-d4
+Decisions, set 3 answers
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+
+paragraph start
+name: paragraph-d4-server
+All edits go through the server, which orders them. The editor and
+the web page never write alone. A write answers at once and the
+commit runs in the background, with a visible committing flag.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-nesting
+Repeat, timer and pause nest in any order, with a depth limit he
+sets. The same block used twice gets an automatic instance id for
+each use, and he can rename it.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-levels
+Everything has a level: a step, a chain and a whole plan, each
+with its own number.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-blocks
+Rule: almost every part of this feature is a block type file. A
+time kind is a block, a repeat kind is a block, a timer kind is a
+block and a mark kind is a block. A part that is not a block breaks
+the system. Formulas stay only a field inside a block.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-marks-link
+A mark is stored once and shown everywhere by links. Marking a
+file in a layout or in the file itself, by hand, by code or by the
+runfile system, gives the same result: it appears in both. Nothing
+is copied. Why: one source, every place reads it.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-marks-dir
+Mark kinds live in a marks subfolder of .runfile, apart from the
+block types. The default kinds are in the default runfile folder.
+Users add their own in .runfile/marks. The indexer reads that
+subfolder.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d4-progress
+Progress loads only from the worktree. Taps write the progress file
+in the worktree without a commit, and the commit happens when he
+stops the chain. Why: the history is not filled with small steps
+and a wipe of tmp loses nothing. The tmp scratch file is not used.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-d5
+title start
+name: title-tp-d5
+Decisions, set 4: walk, web, notes
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-d5-step-screen
+One step can take the full screen, to show as much as possible.
+What a step shows is switchable part by part: title, description,
+timer, level, chain progress, a preview of the next step and the
+link to the original.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-surfaces
+The walk runs everywhere in sync: the shell, a TUI inside the
+editor and the web page. It can be started from any of them and he
+can switch between them. It runs from keys first, and also from
+mouse, buttons and touch on the web page. The key map is editable.
+The web start needs its own plan, with the web dashboard.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-timer-end
+What happens when a timer ends is chosen per step: wait for him,
+mark done, or start the next step. Later steps may use text to
+voice and notifications, so this part must stay open to new kinds.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-jump
+He can jump forward and backward in a chain. A chain is made for a
+reason, but a jump is his choice. Every jump is recorded in the
+step.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-read-original
+Opening the original block or file pauses every timer of the
+walk. He comes back to the same place and continues. Why: reading
+the source needs full attention.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-order
+Chains stay in one straight line. A step of another chain that
+falls due while one runs, such as an hourly step during a work
+chain, merges into that line by time. There are no lanes.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-web
+The web interface is made of boxes, like the rest of the
+ecosystem, and every setting is reachable there. The settings TUI
+is the same on the web page, because the terminal multiplexer is
+planned as an interface for the web page and renders everything
+inside it. The page layout waits for its own plan. Charts are not
+default. The option stays open and a chart reads the numbers that
+already live in the steps.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-live
+Live updates do not depend on who changed something. The server
+keeps every surface current all the time.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-folders
+Folders for block types. Marks, times, repeats and timers each get
+a folder of their own, in the default runfile folder and in the
+nearest .runfile folder. Why: they are different things from
+content block types and the user adds more in the same place. The
+indexer and both block registries must read these folders.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-notes
+Notes. He takes notes in real time while he walks. A note is for a
+hole or an idea that must not stop the chain. Notes go to a notes
+file of the chain, or of the whole nested chain. At the end he is
+asked whether to keep the file. A kept file goes to the todo, so a
+note becomes work. A note links to its step by the instance id.
+Notes need their own planning and settings. Example: a gap seen in
+an original is noted now and fixed later.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-history
+History of finished chains and of level changes: undecided. It is
+kept only if it clearly helps him or the AI. Decided when the
+progress format is planned.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d5-readme
+README rule. A feature enters the README only when it is built and
+confirmed on screen, and its lines leave the plan at the same time.
+Each new block type gets a short paragraph and a row in a table.
+The plan itself is not copied into the README.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-d5-order-build
+The build order is asked only when the plan is closed.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-d6
+title start
+name: title-tp-d6
+Decisions, set 5: progress, marks, notes, surfaces
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-d6-progress
+Progress is an append-only event log. Each step instance holds its
+events in the progress file of its worktree, and its state is
+computed from them: running, done, skipped, level, due. State is
+never stored as the truth. Why: nothing is lost, a new scheduling
+kind can be added later and read the old events, and regress is
+just another event. An optional snapshot may be added later for
+speed.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-events
+An instance records everything: start, done, skip, snooze, jump,
+pause, resume, regress with its rule, level change, measure values,
+timer events, note links and who made the change. The event kinds
+are open, a new kind needs no change to the others.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-schedule
+Scheduling kinds are blocks that read the events: fixed clock,
+relative, sun, month, year, decade, and later spaced repetition
+such as SM-2 or FSRS. Spaced repetition runs per step instance.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-marks
+Built-in mark kinds: rule, step, check, fact, card, goal and note.
+More are added later and by the user. The card kind exists today
+and moves to the marks folder. Extra fields of a mark, such as
+level, every and minutes, live in their own block next to the mark
+and not on the marked block.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-notes
+Notes live in the worktree next to the chain file, uncommitted,
+while the chain runs. At the end a pop-up asks whether to send the
+notes to the todo. Kept notes go to a separate todo notes file in
+the root, so he returns to normal work with the todo ready. Why: a
+note usually means something must change. Open: whether he picks
+notes one by one.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-formula
+Measure formulas stay small and modular. The core is numbers and
+the four operations, and every further operator is added as its own
+part, including plus and minus steps that count up in increments.
+The server computes them and the editor and the web page ask it.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-surfaces
+Every surface has the same format and the server is behind all of
+them. The web page is for accessibility and for its stronger
+graphics, not for different features. The walk can be started from
+any surface.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d6-worktrees
+Every instance gets its own git worktree: a tutorial, a workout, a
+test, each separate. Why: the book repo stays small to navigate and
+each instance commits alone. The server picks the repo from the
+folder of the file and gives a clear error when no repo owns it.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-d7
+title start
+name: title-tp-d7
+Decisions, set 6: names
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-d7-names
+The names, from the netrunner idea. The whole feature is netrun. A
+guided doing is a run. One step stays a step. A group of steps in a
+run is a stack. Starting and stopping a run is jack in and jack
+out. The progress log is the ledger. The full-screen step view is
+the screen. A level stays a level. The ecosystem becomes subnet,
+and the operating system is subnet OS. Why: one brand for every
+part.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d7-sandbox
+Open: the worktree of one run. He said subnet for it, but subnet
+is now the ecosystem name. Proposed name: sandbox. Confirm before
+use.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d7-stale
+The older chapters still say track, chain, log and worktree. They
+are renamed in one pass when the build starts, and not before.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d7-rebrand
+Rebrand rule. The rename never runs blindly. Every old name is
+surveyed first, then each group of renames is approved one by one.
+A name he did not mention stays unchanged until he says so.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-d7-holes
+Holes left, small ones for the build. One: how many sandboxes may
+exist and how an old one is closed. Two: how a sandbox branch is
+kept apart or merged. Three: the loader for the folders of mark,
+time, repeat and timer block types. Four: one schema for the same
+form in the file, the settings TUI and the web page. The web page
+layout has its own plan and the dashboard comes last. The build
+order is asked next.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+paragraph start
+name: paragraph-tp-status
+Status: plan only. No code, no block types and no files until this
+page is agreed. Every decision is written here at once.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter start
+name: section-tp-what
+title start
+name: title-tp-what
+What a track is
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-what-one
+A track is an ordered walk through marked blocks of the book. It
+is for anything done again and again or step by step: a daily
+routine, an hourly care loop, a workout, learning a skill, a test
+run, a checklist before a trip.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-what-goal
+The goal: mark something once, then the ecosystem turns the marks
+into a living routine. It tells you what to do now, remembers
+what you did and grows with you through levels.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-tp-what-promises
+Five promises. One: the original files never change and never
+know which tracks use them. Two: everything computed stays out of
+the page. Three: colors come only from the theme engine. Four:
+every layer works alone, so the first layers are useful before
+the last ones exist. Five: phone first, one hand, short taps.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-layers
+title start
+name: title-tp-layers
+The layers
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-layers-one
+Ten modules, built in this order. Each one is useful alone and
+each one closes its own holes before the next one starts.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+code start
+name: code-tp-layers
+language: text
+M1  marks      mark a file, chapter or block
+M2  track      a file of ordered references
+M3  progress   a log of what was done and when
+M4  time       when a step is due
+M5  levels     steps that unlock by level
+M6  chains     a track after, inside or beside another
+M7  views      checklist, rule list, overview, history
+M8  walk       one step at a time, pause, resume
+M9  web        layout and web view for tracks
+M10 alerts     a reminder at the due time
+code end
+
+chapter end
+
+chapter start
+name: section-tp-marks
+title start
+name: title-tp-marks
+M1 Marks
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-marks-kinds
+A mark says: this block matters for a purpose. Kinds: rule, step,
+fact, check and card. A rule goes to the rule list. A check is a
+yes or no item for a checklist. A step goes into a track. A fact
+and a card feed a fact sheet and a card deck. A kind is a
+.blocktype file, so a new kind needs no code.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-marks-where
+Where: a whole file, a chapter or one block. Marking a chapter
+marks everything inside it, in order. Marking a file marks the
+file as one item.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-tp-marks-fields
+What lives where: the why and the short label live on the
+original block. Level, schedule and minutes live on the track
+reference, because one block can sit in several tracks with
+different levels. The mark may hold defaults, the reference
+overrides them.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-tp-marks-lists
+Each kind has its own compiled list: the rule list, the
+checklist, the fact sheet, the card deck. They are views of the
+index, never files written by hand.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-file
+title start
+name: title-tp-file
+M2 The track file
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-file-one
+A track is a normal .run file of kind track. It has a title, a
+goal, a sort (routine, learn, test, care or anything) and then
+ordered reference blocks.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-file-ref
+A reference block points at a block by its name, the same way
+links do, and the index resolves it. Fields: target, level, every,
+minutes, note, replaces. Numbering is automatic. The order
+changes by moving the reference blocks. The originals are never
+touched.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-file-group
+Groups: a group block wraps references into phases such as
+morning, work and evening. A group can carry its own schedule or
+window, so every step inside inherits it.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-file-make
+Making a track: from a marked chapter, from a rule list or from
+an empty file. Making one only writes references, never copies
+text.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-levels
+title start
+name: title-tp-levels
+M5 Levels
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-levels-add
+Level 1 holds the basics and each level adds to the one before. A
+step has the level where it enters. Walking level n shows every
+step with level up to n.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-levels-replace
+Replace: a step at a higher level can replace a lower one, for
+example ten push-ups become twenty. Walking the higher level
+shows only the replacement. Why: growth without a list that grows
+forever.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-levels-names
+Levels may have names such as basic, normal and strong. Without
+names they are numbers.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-chains
+title start
+name: title-tp-chains
+M6 Chains and combinations
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-chains-chain
+Chain: track A has a next track B. When A is finished, B starts.
+A day is morning, work, evening.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-chains-include
+Include: track C includes tracks A and B and their steps appear
+in C. Example: body includes self care and workout. Each include
+sets the level it takes: a fixed one, or follow the level of C.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+paragraph start
+name: paragraph-tp-chains-parallel
+Parallel: several tracks active at the same time, hourly and
+daily ones together. The checklist merges what is due from all.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-chains-cycle
+A track holds a track by include, so year holds month holds day.
+A loop (A holds B holds A) is refused by the check, which names
+the loop. There is a depth limit.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-time
+title start
+name: title-tp-time
+M4 Time
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-time-every
+A step may carry a schedule: every hour, every N minutes, daily
+at a time, on weekdays, weekly, monthly, yearly, once, or after
+the previous step plus N minutes.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-time-window
+Window: waking hours are declared once per track, so hourly means
+eight to twenty-two and not at night. Time zone comes from the
+system, the server is the one clock.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-progress
+title start
+name: title-tp-progress
+M3 Progress
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+
+paragraph start
+name: paragraph-tp-progress-pause
+The paused place is the step where the walk stopped. The book can
+be read normally and the walk resumes there.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-progress-computed
+Computed from the log, never written back: streak, rate, last
+done, what is due, minutes spent. A year rotates the log into an
+archive.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+
+chapter end
+
+chapter start
+name: section-tp-views
+title start
+name: title-tp-views
+M7 Views and M9 Web
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-views-list
+Compiled views: checklist (due now), rule list, fact sheet, card
+deck, track overview with levels as rows, day plan as a timeline,
+history per day and a week grid.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-views-data
+The server sends each view as data from the index and the page
+draws it as a real UI. Colors and corners come only from the
+theme engine, never from a track file.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-views-layout
+Layout: tracks reuse the layout system. A track layout file
+places step cards in the web view, levels as frames and chains as
+arrows.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-views-shell
+Shell: a tv menu picks a track and one key opens the checklist.
+Everything shown in a terminal wraps to the screen width. The key
+name is a hole.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-walk
+title start
+name: title-tp-walk
+M8 Walk mode
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-walk-one
+The walk shows one step at a time with the exact part of the
+original block, large. Actions: done, skip, later, back, pause
+and the level view.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-walk-modes
+Two walks: the due list (what is due now) and the whole track
+from the top. Pause works anywhere. On a phone one key means done.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-server
+title start
+name: title-tp-server
+Server and index
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-server-index
+New index kinds: mark, track-item, track-link and progress-event,
+built the way the layout kinds are.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-server-cmd
+Proposed commands, one line answers like the others: tracks, due,
+walk, done, skip, level, pause. The socket pushes changes to the
+web view. The CLI mirrors them.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-server-check
+The broken check learns four reports: broken reference, loop,
+unknown level and missing target.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-order
+title start
+name: title-tp-order
+Build order and done rule
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-order-first
+First usable day: M1, M2, M3 and the checklist from M7. That
+gives marks, a track file, a log and a list of what to do. Then
+M4 time, M5 levels, M6 chains, M8 walk, M9 web, M10 alerts.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-order-done
+A module is done when it has its block type files, its drawing,
+its README lines and a recorded test, and he confirmed on screen.
+Then its lines leave this page.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+
+chapter start
+name: section-tp-examples
+title start
+name: title-tp-examples
+Examples in words
+contract start
+id: q87b175
+question: Does the title name the idea?
+contract end
+answer start
+for: q87b175
+asked: Does the title name the idea?
+
+answer end
+title end
+
+paragraph start
+name: paragraph-tp-ex-body
+Body track: it includes self care and workout at level 1. Each
+waking hour: stretch, push-ups, sit-ups, drink water, wet wipe.
+Level 2 replaces ten push-ups with twenty and adds neck work. On
+a bad day the walk drops one level for that day only.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-ex-learn
+Learning track: mark the chapters of a book, a track walks them
+in order, the marked facts become a card deck. A test track is
+the same with check items and a pass count.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+paragraph start
+name: paragraph-tp-ex-year
+Year track: it includes months, months include days, days include
+the hourly body track. One file edit on a day reaches the year.
+contract start
+id: q1deb06
+question: Is this one idea a reader could restate?
+contract end
+answer start
+for: q1deb06
+asked: Is this one idea a reader could restate?
+
+answer end
+paragraph end
+
+chapter end
+

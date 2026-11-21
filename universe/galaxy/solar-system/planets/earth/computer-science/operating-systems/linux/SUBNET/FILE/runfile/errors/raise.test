@@ -1,0 +1,6 @@
+test mod-raise
+level 2
+module ../../FILE/runfile/errors/raise.rkt
+call (procedure? raise-err)
+expect result equals #t
+expect seconds-under 20

@@ -1,0 +1,86 @@
+[package]
+authors.workspace = true
+description = "Support for writing Nushell tests"
+repository = "https://github.com/nushell/shell/tree/main/crates/shell-test-support"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "shell-test-support"
+version.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lib]
+doctest = false
+bench = false
+
+[lints]
+workspace = true
+
+[features]
+os = [
+  "shell-cli",
+  "shell-cmd-lang/os",
+  "shell-command/os",
+  "shell-engine/os",
+  "shell-protocol/os",
+  "shell-utils/os",
+  "dep:shell-tui",
+]
+network = ["shell-command/network"]
+rustls-tls = ["shell-command/rustls-tls"]
+plugin = [
+  "dep:shell-cmd-plugin",
+  "dep:shell-plugin-core",
+  "dep:shell-plugin-engine",
+  "shell-protocol/plugin",
+  "os",
+]
+
+[dependencies]
+shell-cli = { workspace = true, optional = true }
+shell-cmd-base.workspace = true
+shell-cmd-extra.workspace = true
+shell-cmd-lang.workspace = true
+shell-cmd-plugin = { workspace = true, optional = true }
+shell-command.workspace = true
+shell-tui = { workspace = true, optional = true }
+shell-engine.workspace = true
+shell-experimental.workspace = true
+shell-glob.workspace = true
+shell-parser.workspace = true
+shell-path.workspace = true
+shell-plugin-core = { workspace = true, optional = true }
+shell-plugin-engine = { workspace = true, optional = true }
+shell-protocol.workspace = true
+shell-std.workspace = true
+shell-test-support-macros.workspace = true
+shell-utils.workspace = true
+
+derive_more = { workspace = true, features = ["debug"] }
+indoc = { workspace = true }
+itertools = { workspace = true }
+kitest = { workspace = true }
+lexopt = { workspace = true }
+linkme = { workspace = true }
+miette = { workspace = true }
+nu-ansi-term = { workspace = true }
+num-format = { workspace = true }
+parking_lot = { workspace = true }
+pastey = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+which = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+gatekeeper = { workspace = true }
+
+[dev-dependencies]
+# doc tests use the "os" feature of `shell-command`
+shell-cmd-lang = { workspace = true, features = ["default"] }
+shell-command = { workspace = true, features = ["default"] }
+
+bytes = { workspace = true }
+rstest = { workspace = true }

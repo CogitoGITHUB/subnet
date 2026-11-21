@@ -1,0 +1,6 @@
+test mod-aiutext
+level 2
+module ../../FILE/runfile/data/run-text.rkt
+call (procedure? blocks->run-text)
+expect result equals #t
+expect seconds-under 20

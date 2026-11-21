@@ -1,0 +1,82 @@
+{%- let section = "# =============================================================================\n#" -%}
+{%- let not_configured = "# -- not configured --" -%}
+
+{%- decl pwd_cmd -%}
+{%- if resolve_symlinks -%}
+{%- let pwd_cmd = "pwd -P" -%}
+{%- else -%}
+{%- let pwd_cmd = "pwd -L" -%}
+{%- endif -%}
+
+{{ section }}
+# Hook configuration for shell-jump.
+#
+{%- if hook != InitHook::None %}
+
+# Hook to add new entries to the database.
+{%- if hook == InitHook::Prompt %}
+alias __shell_jump_hook 'shell-jump add -- "`{{ pwd_cmd }}`"'
+
+{%- else if hook == InitHook::Pwd %}
+set __shell_jump_pwd_old = `{{ pwd_cmd }}`
+alias __shell_jump_hook 'set __shell_jump_pwd_tmp = "`{{ pwd_cmd }}`"; test "$__shell_jump_pwd_tmp" != "$__shell_jump_pwd_old" && shell-jump add -- "$__shell_jump_pwd_tmp"; set __shell_jump_pwd_old = "$__shell_jump_pwd_tmp"'
+{%- endif %}
+
+# Initialize hook.
+set __shell_jump_precmd = "`alias precmd`"
+if ( "$__shell_jump_precmd" !~ *__shell_jump_hook* ) then
+    if ( "$__shell_jump_precmd" == "" ) then
+        alias precmd '__shell_jump_hook'
+    else
+        alias precmd "$__shell_jump_precmd"';__shell_jump_hook'
+    endif
+endif
+unset __shell_jump_precmd
+
+{%- endif %}
+
+{{ section }}
+# When using shell-jump with --no-cmd, alias these internal functions as desired.
+#
+
+# Jump to a directory using only keywords.
+alias __shell_jump_z 'set __shell_jump_args = (\!*)\
+if ("$#__shell_jump_args" == 0) then\
+    cd ~\
+else\
+    if ("$#__shell_jump_args" == 1 && "$__shell_jump_args[1]" == "-") then\
+        cd -\
+    else if ("$#__shell_jump_args" == 1 && -d "$__shell_jump_args[1]") then\
+        cd "$__shell_jump_args[1]"\
+    else\
+        set __shell_jump_pwd = `{{ pwd_cmd }}`\
+        set __shell_jump_result = "`shell-jump query --exclude '"'"'$__shell_jump_pwd'"'"' -- $__shell_jump_args`" && cd "$__shell_jump_result"\
+    endif\
+endif'
+
+# Jump to a directory using interactive search.
+alias __shell_jump_zi 'set __shell_jump_args = (\!*)\
+set __shell_jump_pwd = `{{ pwd_cmd }}`\
+set __shell_jump_result = "`shell-jump query --exclude '"'"'$__shell_jump_pwd'"'"' --interactive -- $__shell_jump_args`" && cd "$__shell_jump_result"'
+
+{{ section }}
+# Commands for shell-jump. Disable these using --no-cmd.
+#
+
+{%- match cmd %}
+{%- when Some with (cmd) %}
+
+alias {{cmd}} __shell_jump_z
+alias {{cmd}}i __shell_jump_zi
+
+{%- when None %}
+
+{{ not_configured }}
+
+{%- endmatch %}
+
+{{ section }}
+# To initialize shell-jump, add this to your shell configuration file (usually ~/.tcshrc):
+#
+#     shell-jump init tcsh > ~/.shell-jump.tcsh
+#     source ~/.shell-jump.tcsh

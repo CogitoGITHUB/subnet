@@ -1,0 +1,10 @@
+(spec
+  (format-version 2)
+  (name run-terminal-multiplexer)
+  (version "0.1.0")
+  (summary "the RUN terminal multiplexer")
+  (source (local "/root/home/shape/Ætherion/universe/galaxy/solar-system/planets/earth/computer-science/operating-systems/linux/SUBNET/TERMINAL MULTIPLEXER"))
+  (build (steps (run #:argv ("raco" "exe" "-o" "runmux-built" "multiplexer/entry/mux.rkt"))))
+  (install (prefix (copy-tree "multiplexer" "multiplexer") (bin "runmux-built" "bin/runmux")))
+  (license mit)
+  (homepage "https://example.invalid/"))

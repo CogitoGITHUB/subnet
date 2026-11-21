@@ -1,0 +1,46 @@
+[package]
+authors.workspace = true
+description = "Composable terminal UI commands for Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/shell-tui"
+edition.workspace = true
+license.workspace = true
+name = "shell-tui"
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+bench = false
+
+[[test]]
+name = "tests"
+path = "tests/main.rs"
+harness = false
+
+[lints]
+workspace = true
+
+[dependencies]
+shell-protocol = { workspace = true, features = ["os"] }
+shell-engine = { workspace = true, features = ["os"] }
+shell-command = { workspace = true, features = ["os"] }
+shell-color-config.workspace = true
+shell-explore.workspace = true
+shell-utils.workspace = true
+shell-system.workspace = true
+nu-ansi-term.workspace = true
+
+ansi-str = { workspace = true }
+crossterm = { workspace = true }
+lscolors = { workspace = true, default-features = false, features = [
+    "nu-ansi-term",
+] }
+mime_guess = { workspace = true }
+nucleo-matcher = { workspace = true }
+ratatui = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+typetag = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+shell-cmd-lang = { workspace = true, features = ["os"] }
+shell-test-support = { path = "../shell-test-support", features = ["os"] }

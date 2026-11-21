@@ -1,0 +1,21 @@
+[metadata]
+name = "run-list-types"
+description = "File types that load"
+
+[source]
+command = "bash run-list.sh types"
+display = "{}"
+output = "{}"
+
+[preview]
+cached = false
+command = "bash run-list-preview-fit.sh type \"{}\""
+
+[keybindings]
+enter = "actions:pick"
+
+[actions.pick]
+description = "write the chosen type to /tmp/run-list"
+command = "printf %s {} > /tmp/run-list"
+shell = "bash"
+mode = "execute"

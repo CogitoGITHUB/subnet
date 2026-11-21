@@ -1,0 +1,21 @@
+[metadata]
+name = "run-types"
+description = "Pick a file type"
+
+[source]
+command = "bash run-types.sh"
+display = "{}"
+output = "{}"
+
+[preview]
+cached = false
+command = 'bash run-type-preview-fit.sh "{}"'
+
+[keybindings]
+enter = "actions:pick"
+
+[actions.pick]
+description = "write the chosen type to /tmp/run-type"
+command = "printf %s {} > /tmp/run-type"
+shell = "bash"
+mode = "execute"

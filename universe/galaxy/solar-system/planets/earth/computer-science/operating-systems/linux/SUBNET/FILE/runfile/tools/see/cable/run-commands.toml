@@ -1,0 +1,21 @@
+[metadata]
+name = "run-commands"
+description = "Pick an run command"
+
+[source]
+command = "cat run-commands.txt"
+display = "{split:;:0}"
+output = "{split:;:0}"
+
+[preview]
+cached = false
+command = "bash run-cmd-preview.sh \"{}\""
+
+[keybindings]
+enter = "actions:pick"
+
+[actions.pick]
+description = "write the chosen command to /tmp/run-cmd"
+command = "printf %s {} > /tmp/run-cmd"
+shell = "bash"
+mode = "execute"

@@ -1,0 +1,6 @@
+test mod-location
+level 2
+module editor/bridge/location.rkt
+call runfile-tail
+expect result equals ("FILE" "runfile" "target" "debug" "runfile")
+expect seconds-under 20

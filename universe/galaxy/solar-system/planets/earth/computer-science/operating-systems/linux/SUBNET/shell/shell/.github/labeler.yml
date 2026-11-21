@@ -1,0 +1,40 @@
+# A bot for automatically labelling pull requests 
+# See https://github.com/actions/labeler
+
+A:plugin-polars:
+  - changed-files:
+    - any-glob-to-any-file:
+      - crates/shell_plugin_polars/**
+
+A:std-library:
+  - changed-files:
+    - any-glob-to-any-file:
+      - crates/shell-std/**
+
+A:ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - .github/workflows/**
+
+
+A:LSP:
+  - changed-files:
+    - any-glob-to-any-file:
+      - crates/shell-lsp/**
+
+A:parser:
+  - changed-files:
+    - any-glob-to-any-file:
+      - crates/shell-parser/**
+
+A:plugins:
+  - changed-files:
+    - any-glob-to-any-file:
+      # plugins API
+      - crates/shell-plugin/**
+      - crates/shell-plugin-core/**
+      - crates/shell-plugin-engine/**
+      - crates/shell-plugin-protocol/**
+      - crates/shell-plugin-test-support/**
+      # specific plugins (like polars)
+      - crates/shell_plugin_*/**

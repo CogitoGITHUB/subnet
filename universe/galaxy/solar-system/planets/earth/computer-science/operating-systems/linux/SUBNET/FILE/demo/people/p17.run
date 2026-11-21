@@ -1,0 +1,20 @@
+title start
+Demo people 17
+title end
+
+paragraph start
+Page 17 of people.
+paragraph end
+
+link start
+name: l1-p17
+target: demo/people/p03.run
+face: ref
+link end
+
+link start
+name: l2-p17
+target: demo/people/p13.run
+face: ref
+link end
+

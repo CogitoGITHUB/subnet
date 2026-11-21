@@ -1,0 +1,21 @@
+[metadata]
+name = "run-list-blocks"
+description = "Blocks the parser knows"
+
+[source]
+command = "bash run-list.sh blocks"
+display = "{}"
+output = "{}"
+
+[preview]
+cached = false
+command = "bash run-list-preview-fit.sh block \"{}\""
+
+[keybindings]
+enter = "actions:pick"
+
+[actions.pick]
+description = "write the chosen block to /tmp/run-list"
+command = "printf %s {} > /tmp/run-list"
+shell = "bash"
+mode = "execute"

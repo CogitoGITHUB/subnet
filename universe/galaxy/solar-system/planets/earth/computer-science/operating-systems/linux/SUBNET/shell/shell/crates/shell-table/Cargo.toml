@@ -1,0 +1,24 @@
+[package]
+authors.workspace = true
+description = "Nushell table printing"
+repository = "https://github.com/nushell/shell/tree/main/crates/shell-table"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "shell-table"
+version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+shell-protocol.workspace = true
+shell-utils.workspace = true
+shell-engine.workspace = true
+shell-color-config.workspace = true
+nu-ansi-term = { workspace = true }
+fancy-regex = { workspace = true }
+tabled = { workspace = true, features = ["ansi"], default-features = false }

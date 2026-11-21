@@ -1,0 +1,4013 @@
+runfile-index	1
+R	block	EDITOR/runtd-tutorial.run:1	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:101	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	101
+F	end-line	114
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:102	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	102
+F	end-line	104
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:106	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	106
+F	end-line	108
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:110	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	110
+F	end-line	112
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:116	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	116
+F	end-line	125
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:117	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	117
+F	end-line	119
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:12	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:121	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	121
+F	end-line	123
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:16	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	16
+F	end-line	18
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:22	EDITOR/runtd-tutorial.run
+F	block	comment
+F	line	22
+F	end-line	24
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:26	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	26
+F	end-line	39
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:27	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	27
+F	end-line	29
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:31	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	31
+F	end-line	33
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:35	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	35
+F	end-line	37
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:41	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	41
+F	end-line	54
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:42	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	42
+F	end-line	44
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:46	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	46
+F	end-line	48
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:50	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	50
+F	end-line	52
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:56	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	56
+F	end-line	69
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:57	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	57
+F	end-line	59
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:61	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	61
+F	end-line	63
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:65	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	65
+F	end-line	67
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:7	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	7
+F	end-line	20
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:71	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	71
+F	end-line	84
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:72	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	72
+F	end-line	74
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:76	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	76
+F	end-line	78
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:8	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:80	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	80
+F	end-line	82
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:86	EDITOR/runtd-tutorial.run
+F	block	section
+F	line	86
+F	end-line	99
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:87	EDITOR/runtd-tutorial.run
+F	block	title
+F	line	87
+F	end-line	89
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:91	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	91
+F	end-line	93
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/runtd-tutorial.run:95	EDITOR/runtd-tutorial.run
+F	block	paragraph
+F	line	95
+F	end-line	97
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:1	EDITOR/text-editor/test.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:100	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	100
+F	end-line	103
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:105	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	105
+F	end-line	108
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:11	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	11
+F	end-line	13
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:111	EDITOR/text-editor/test.run
+F	block	section
+F	line	111
+F	end-line	133
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:112	EDITOR/text-editor/test.run
+F	block	title
+F	line	112
+F	end-line	114
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:116	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	116
+F	end-line	118
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:120	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	120
+F	end-line	122
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:124	EDITOR/text-editor/test.run
+F	block	code
+F	line	124
+F	end-line	132
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:135	EDITOR/text-editor/test.run
+F	block	section
+F	line	135
+F	end-line	155
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:136	EDITOR/text-editor/test.run
+F	block	title
+F	line	136
+F	end-line	138
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:140	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	140
+F	end-line	142
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:144	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	144
+F	end-line	146
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:148	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	148
+F	end-line	150
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:15	EDITOR/text-editor/test.run
+F	block	section
+F	line	15
+F	end-line	47
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:152	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	152
+F	end-line	154
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:157	EDITOR/text-editor/test.run
+F	block	section
+F	line	157
+F	end-line	185
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:158	EDITOR/text-editor/test.run
+F	block	title
+F	line	158
+F	end-line	160
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:16	EDITOR/text-editor/test.run
+F	block	title
+F	line	16
+F	end-line	18
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:162	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	162
+F	end-line	164
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:166	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	166
+F	end-line	168
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:170	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	170
+F	end-line	172
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:174	EDITOR/text-editor/test.run
+F	block	code
+F	line	174
+F	end-line	184
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:187	EDITOR/text-editor/test.run
+F	block	section
+F	line	187
+F	end-line	201
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:188	EDITOR/text-editor/test.run
+F	block	title
+F	line	188
+F	end-line	190
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:192	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	192
+F	end-line	194
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:196	EDITOR/text-editor/test.run
+F	block	code
+F	line	196
+F	end-line	200
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:20	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	20
+F	end-line	22
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:203	EDITOR/text-editor/test.run
+F	block	comment
+F	line	203
+F	end-line	205
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:24	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	24
+F	end-line	26
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:28	EDITOR/text-editor/test.run
+F	block	section
+F	line	28
+F	end-line	46
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:29	EDITOR/text-editor/test.run
+F	block	title
+F	line	29
+F	end-line	31
+F	depth	2
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:33	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	33
+F	end-line	35
+F	depth	2
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:37	EDITOR/text-editor/test.run
+F	block	section
+F	line	37
+F	end-line	45
+F	depth	2
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:38	EDITOR/text-editor/test.run
+F	block	title
+F	line	38
+F	end-line	40
+F	depth	3
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:42	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	42
+F	end-line	44
+F	depth	3
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:49	EDITOR/text-editor/test.run
+F	block	section
+F	line	49
+F	end-line	78
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:50	EDITOR/text-editor/test.run
+F	block	title
+F	line	50
+F	end-line	52
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:54	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	54
+F	end-line	56
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:58	EDITOR/text-editor/test.run
+F	block	code
+F	line	58
+F	end-line	69
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:7	EDITOR/text-editor/test.run
+F	block	comment
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:71	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	71
+F	end-line	73
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:75	EDITOR/text-editor/test.run
+F	block	comment
+F	line	75
+F	end-line	77
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:80	EDITOR/text-editor/test.run
+F	block	section
+F	line	80
+F	end-line	109
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:81	EDITOR/text-editor/test.run
+F	block	title
+F	line	81
+F	end-line	83
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:85	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	85
+F	end-line	88
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:90	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	90
+F	end-line	93
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/text-editor/test.run:95	EDITOR/text-editor/test.run
+F	block	paragraph
+F	line	95
+F	end-line	98
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:1	EDITOR/todo.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:103	EDITOR/todo.run
+F	block	section
+F	line	103
+F	end-line	107
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:104	EDITOR/todo.run
+F	block	title
+F	line	104
+F	end-line	106
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:109	EDITOR/todo.run
+F	block	section
+F	line	109
+F	end-line	162
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:110	EDITOR/todo.run
+F	block	title
+F	line	110
+F	end-line	112
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:114	EDITOR/todo.run
+F	block	paragraph
+F	line	114
+F	end-line	116
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:118	EDITOR/todo.run
+F	block	paragraph
+F	line	118
+F	end-line	121
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:12	EDITOR/todo.run
+F	block	paragraph
+F	line	12
+F	end-line	15
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:123	EDITOR/todo.run
+F	block	paragraph
+F	line	123
+F	end-line	126
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:128	EDITOR/todo.run
+F	block	paragraph
+F	line	128
+F	end-line	131
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:133	EDITOR/todo.run
+F	block	paragraph
+F	line	133
+F	end-line	136
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:138	EDITOR/todo.run
+F	block	paragraph
+F	line	138
+F	end-line	141
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:143	EDITOR/todo.run
+F	block	paragraph
+F	line	143
+F	end-line	146
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:148	EDITOR/todo.run
+F	block	paragraph
+F	line	148
+F	end-line	151
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:153	EDITOR/todo.run
+F	block	paragraph
+F	line	153
+F	end-line	156
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:158	EDITOR/todo.run
+F	block	paragraph
+F	line	158
+F	end-line	161
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:164	EDITOR/todo.run
+F	block	section
+F	line	164
+F	end-line	188
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:165	EDITOR/todo.run
+F	block	title
+F	line	165
+F	end-line	167
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:169	EDITOR/todo.run
+F	block	paragraph
+F	line	169
+F	end-line	172
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:17	EDITOR/todo.run
+F	block	paragraph
+F	line	17
+F	end-line	20
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:174	EDITOR/todo.run
+F	block	paragraph
+F	line	174
+F	end-line	177
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:179	EDITOR/todo.run
+F	block	paragraph
+F	line	179
+F	end-line	182
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:184	EDITOR/todo.run
+F	block	paragraph
+F	line	184
+F	end-line	187
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:190	EDITOR/todo.run
+F	block	section
+F	line	190
+F	end-line	229
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:191	EDITOR/todo.run
+F	block	title
+F	line	191
+F	end-line	193
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:195	EDITOR/todo.run
+F	block	paragraph
+F	line	195
+F	end-line	198
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:200	EDITOR/todo.run
+F	block	paragraph
+F	line	200
+F	end-line	203
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:205	EDITOR/todo.run
+F	block	paragraph
+F	line	205
+F	end-line	208
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:210	EDITOR/todo.run
+F	block	paragraph
+F	line	210
+F	end-line	213
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:215	EDITOR/todo.run
+F	block	paragraph
+F	line	215
+F	end-line	218
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:22	EDITOR/todo.run
+F	block	paragraph
+F	line	22
+F	end-line	25
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:220	EDITOR/todo.run
+F	block	paragraph
+F	line	220
+F	end-line	223
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:225	EDITOR/todo.run
+F	block	paragraph
+F	line	225
+F	end-line	228
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:231	EDITOR/todo.run
+F	block	section
+F	line	231
+F	end-line	265
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:232	EDITOR/todo.run
+F	block	title
+F	line	232
+F	end-line	234
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:236	EDITOR/todo.run
+F	block	paragraph
+F	line	236
+F	end-line	239
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:241	EDITOR/todo.run
+F	block	paragraph
+F	line	241
+F	end-line	244
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:246	EDITOR/todo.run
+F	block	paragraph
+F	line	246
+F	end-line	249
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:251	EDITOR/todo.run
+F	block	paragraph
+F	line	251
+F	end-line	254
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:256	EDITOR/todo.run
+F	block	paragraph
+F	line	256
+F	end-line	259
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:261	EDITOR/todo.run
+F	block	paragraph
+F	line	261
+F	end-line	264
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:267	EDITOR/todo.run
+F	block	section
+F	line	267
+F	end-line	316
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:268	EDITOR/todo.run
+F	block	title
+F	line	268
+F	end-line	270
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:27	EDITOR/todo.run
+F	block	paragraph
+F	line	27
+F	end-line	30
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:272	EDITOR/todo.run
+F	block	paragraph
+F	line	272
+F	end-line	275
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:277	EDITOR/todo.run
+F	block	paragraph
+F	line	277
+F	end-line	280
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:282	EDITOR/todo.run
+F	block	paragraph
+F	line	282
+F	end-line	285
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:287	EDITOR/todo.run
+F	block	paragraph
+F	line	287
+F	end-line	290
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:292	EDITOR/todo.run
+F	block	paragraph
+F	line	292
+F	end-line	295
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:297	EDITOR/todo.run
+F	block	paragraph
+F	line	297
+F	end-line	300
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:302	EDITOR/todo.run
+F	block	paragraph
+F	line	302
+F	end-line	305
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:307	EDITOR/todo.run
+F	block	paragraph
+F	line	307
+F	end-line	310
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:312	EDITOR/todo.run
+F	block	paragraph
+F	line	312
+F	end-line	315
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:318	EDITOR/todo.run
+F	block	section
+F	line	318
+F	end-line	367
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:319	EDITOR/todo.run
+F	block	title
+F	line	319
+F	end-line	321
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:32	EDITOR/todo.run
+F	block	paragraph
+F	line	32
+F	end-line	35
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:323	EDITOR/todo.run
+F	block	paragraph
+F	line	323
+F	end-line	326
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:328	EDITOR/todo.run
+F	block	paragraph
+F	line	328
+F	end-line	331
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:333	EDITOR/todo.run
+F	block	paragraph
+F	line	333
+F	end-line	336
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:338	EDITOR/todo.run
+F	block	paragraph
+F	line	338
+F	end-line	341
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:343	EDITOR/todo.run
+F	block	paragraph
+F	line	343
+F	end-line	346
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:348	EDITOR/todo.run
+F	block	paragraph
+F	line	348
+F	end-line	351
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:353	EDITOR/todo.run
+F	block	paragraph
+F	line	353
+F	end-line	356
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:358	EDITOR/todo.run
+F	block	paragraph
+F	line	358
+F	end-line	361
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:363	EDITOR/todo.run
+F	block	paragraph
+F	line	363
+F	end-line	366
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:369	EDITOR/todo.run
+F	block	section
+F	line	369
+F	end-line	383
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:37	EDITOR/todo.run
+F	block	paragraph
+F	line	37
+F	end-line	40
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:370	EDITOR/todo.run
+F	block	title
+F	line	370
+F	end-line	372
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:374	EDITOR/todo.run
+F	block	paragraph
+F	line	374
+F	end-line	377
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:379	EDITOR/todo.run
+F	block	paragraph
+F	line	379
+F	end-line	382
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:385	EDITOR/todo.run
+F	block	section
+F	line	385
+F	end-line	390
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:386	EDITOR/todo.run
+F	block	title
+F	line	386
+F	end-line	388
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:392	EDITOR/todo.run
+F	block	section
+F	line	392
+F	end-line	397
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:393	EDITOR/todo.run
+F	block	title
+F	line	393
+F	end-line	395
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:399	EDITOR/todo.run
+F	block	section
+F	line	399
+F	end-line	408
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:400	EDITOR/todo.run
+F	block	title
+F	line	400
+F	end-line	402
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:404	EDITOR/todo.run
+F	block	paragraph
+F	line	404
+F	end-line	407
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:410	EDITOR/todo.run
+F	block	section
+F	line	410
+F	end-line	419
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:411	EDITOR/todo.run
+F	block	title
+F	line	411
+F	end-line	413
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:415	EDITOR/todo.run
+F	block	paragraph
+F	line	415
+F	end-line	418
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:42	EDITOR/todo.run
+F	block	paragraph
+F	line	42
+F	end-line	45
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:421	EDITOR/todo.run
+F	block	section
+F	line	421
+F	end-line	431
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:422	EDITOR/todo.run
+F	block	title
+F	line	422
+F	end-line	424
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:426	EDITOR/todo.run
+F	block	paragraph
+F	line	426
+F	end-line	430
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:433	EDITOR/todo.run
+F	block	section
+F	line	433
+F	end-line	443
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:434	EDITOR/todo.run
+F	block	title
+F	line	434
+F	end-line	436
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:438	EDITOR/todo.run
+F	block	paragraph
+F	line	438
+F	end-line	442
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:445	EDITOR/todo.run
+F	block	section
+F	line	445
+F	end-line	456
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:446	EDITOR/todo.run
+F	block	title
+F	line	446
+F	end-line	448
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:450	EDITOR/todo.run
+F	block	paragraph
+F	line	450
+F	end-line	455
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:458	EDITOR/todo.run
+F	block	section
+F	line	458
+F	end-line	467
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:459	EDITOR/todo.run
+F	block	title
+F	line	459
+F	end-line	461
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:463	EDITOR/todo.run
+F	block	paragraph
+F	line	463
+F	end-line	466
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:469	EDITOR/todo.run
+F	block	section
+F	line	469
+F	end-line	480
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:47	EDITOR/todo.run
+F	block	paragraph
+F	line	47
+F	end-line	50
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:470	EDITOR/todo.run
+F	block	title
+F	line	470
+F	end-line	472
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:474	EDITOR/todo.run
+F	block	paragraph
+F	line	474
+F	end-line	479
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:482	EDITOR/todo.run
+F	block	section
+F	line	482
+F	end-line	489
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:483	EDITOR/todo.run
+F	block	title
+F	line	483
+F	end-line	485
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:486	EDITOR/todo.run
+F	block	paragraph
+F	line	486
+F	end-line	488
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:491	EDITOR/todo.run
+F	block	section
+F	line	491
+F	end-line	498
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:492	EDITOR/todo.run
+F	block	title
+F	line	492
+F	end-line	494
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:495	EDITOR/todo.run
+F	block	paragraph
+F	line	495
+F	end-line	497
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:500	EDITOR/todo.run
+F	block	section
+F	line	500
+F	end-line	507
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:501	EDITOR/todo.run
+F	block	title
+F	line	501
+F	end-line	503
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:504	EDITOR/todo.run
+F	block	paragraph
+F	line	504
+F	end-line	506
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:509	EDITOR/todo.run
+F	block	section
+F	line	509
+F	end-line	526
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:510	EDITOR/todo.run
+F	block	title
+F	line	510
+F	end-line	512
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:513	EDITOR/todo.run
+F	block	paragraph
+F	line	513
+F	end-line	515
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:516	EDITOR/todo.run
+F	block	paragraph
+F	line	516
+F	end-line	519
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:52	EDITOR/todo.run
+F	block	paragraph
+F	line	52
+F	end-line	55
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:521	EDITOR/todo.run
+F	block	paragraph
+F	line	521
+F	end-line	524
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:57	EDITOR/todo.run
+F	block	paragraph
+F	line	57
+F	end-line	60
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:62	EDITOR/todo.run
+F	block	paragraph
+F	line	62
+F	end-line	65
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:67	EDITOR/todo.run
+F	block	paragraph
+F	line	67
+F	end-line	70
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:7	EDITOR/todo.run
+F	block	section
+F	line	7
+F	end-line	97
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	EDITOR/todo.run:72	EDITOR/todo.run
+F	block	paragraph
+F	line	72
+F	end-line	75
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:77	EDITOR/todo.run
+F	block	paragraph
+F	line	77
+F	end-line	80
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:8	EDITOR/todo.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:82	EDITOR/todo.run
+F	block	paragraph
+F	line	82
+F	end-line	85
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:87	EDITOR/todo.run
+F	block	paragraph
+F	line	87
+F	end-line	90
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:92	EDITOR/todo.run
+F	block	paragraph
+F	line	92
+F	end-line	95
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	EDITOR/todo.run:99	EDITOR/todo.run
+F	block	comment
+F	line	99
+F	end-line	101
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/book.run:1	FILE/runfile/types/book.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/book.run:11	FILE/runfile/types/book.run
+F	block	section
+F	line	11
+F	end-line	28
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/book.run:12	FILE/runfile/types/book.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:16	FILE/runfile/types/book.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:18	FILE/runfile/types/book.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/book.run:25	FILE/runfile/types/book.run
+F	block	comment
+F	line	25
+F	end-line	27
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:30	FILE/runfile/types/book.run
+F	block	section
+F	line	30
+F	end-line	52
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/book.run:31	FILE/runfile/types/book.run
+F	block	title
+F	line	31
+F	end-line	33
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:35	FILE/runfile/types/book.run
+F	block	comment
+F	line	35
+F	end-line	46
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:38	FILE/runfile/types/book.run
+F	block	paragraph
+F	line	38
+F	end-line	40
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/book.run:42	FILE/runfile/types/book.run
+F	block	paragraph
+F	line	42
+F	end-line	45
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/book.run:48	FILE/runfile/types/book.run
+F	block	code
+F	line	48
+F	end-line	51
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/book.run:7	FILE/runfile/types/book.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:1	FILE/runfile/types/comment.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:11	FILE/runfile/types/comment.run
+F	block	section
+F	line	11
+F	end-line	22
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:12	FILE/runfile/types/comment.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:16	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	16
+F	end-line	21
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:18	FILE/runfile/types/comment.run
+F	block	comment
+F	line	18
+F	end-line	20
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:24	FILE/runfile/types/comment.run
+F	block	section
+F	line	24
+F	end-line	40
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:25	FILE/runfile/types/comment.run
+F	block	title
+F	line	25
+F	end-line	27
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:29	FILE/runfile/types/comment.run
+F	block	comment
+F	line	29
+F	end-line	39
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:32	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	32
+F	end-line	34
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:36	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	36
+F	end-line	38
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:42	FILE/runfile/types/comment.run
+F	block	section
+F	line	42
+F	end-line	59
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:43	FILE/runfile/types/comment.run
+F	block	title
+F	line	43
+F	end-line	45
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:47	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	47
+F	end-line	53
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:50	FILE/runfile/types/comment.run
+F	block	comment
+F	line	50
+F	end-line	52
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:55	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	55
+F	end-line	58
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/comment.run:7	FILE/runfile/types/comment.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:1	FILE/runfile/types/decision.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:11	FILE/runfile/types/decision.run
+F	block	section
+F	line	11
+F	end-line	28
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:12	FILE/runfile/types/decision.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:16	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:18	FILE/runfile/types/decision.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:25	FILE/runfile/types/decision.run
+F	block	comment
+F	line	25
+F	end-line	27
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:30	FILE/runfile/types/decision.run
+F	block	section
+F	line	30
+F	end-line	48
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:31	FILE/runfile/types/decision.run
+F	block	title
+F	line	31
+F	end-line	33
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:35	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	35
+F	end-line	42
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:37	FILE/runfile/types/decision.run
+F	block	answer
+F	line	37
+F	end-line	41
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:44	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	44
+F	end-line	47
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:50	FILE/runfile/types/decision.run
+F	block	section
+F	line	50
+F	end-line	63
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:51	FILE/runfile/types/decision.run
+F	block	title
+F	line	51
+F	end-line	53
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:55	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	55
+F	end-line	62
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:57	FILE/runfile/types/decision.run
+F	block	answer
+F	line	57
+F	end-line	61
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:65	FILE/runfile/types/decision.run
+F	block	section
+F	line	65
+F	end-line	83
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:66	FILE/runfile/types/decision.run
+F	block	title
+F	line	66
+F	end-line	68
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:7	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:70	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	70
+F	end-line	77
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:72	FILE/runfile/types/decision.run
+F	block	answer
+F	line	72
+F	end-line	76
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/decision.run:79	FILE/runfile/types/decision.run
+F	block	paragraph
+F	line	79
+F	end-line	82
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:1	FILE/runfile/types/default.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/default.run:11	FILE/runfile/types/default.run
+F	block	section
+F	line	11
+F	end-line	38
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/default.run:12	FILE/runfile/types/default.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:16	FILE/runfile/types/default.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:18	FILE/runfile/types/default.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/default.run:25	FILE/runfile/types/default.run
+F	block	paragraph
+F	line	25
+F	end-line	28
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:30	FILE/runfile/types/default.run
+F	block	code
+F	line	30
+F	end-line	33
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:35	FILE/runfile/types/default.run
+F	block	comment
+F	line	35
+F	end-line	37
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:40	FILE/runfile/types/default.run
+F	block	section
+F	line	40
+F	end-line	54
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/default.run:41	FILE/runfile/types/default.run
+F	block	title
+F	line	41
+F	end-line	43
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:45	FILE/runfile/types/default.run
+F	block	section
+F	line	45
+F	end-line	53
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:46	FILE/runfile/types/default.run
+F	block	title
+F	line	46
+F	end-line	48
+F	depth	2
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:50	FILE/runfile/types/default.run
+F	block	paragraph
+F	line	50
+F	end-line	52
+F	depth	2
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/default.run:7	FILE/runfile/types/default.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:1	FILE/runfile/types/journal.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:12	FILE/runfile/types/journal.run
+F	block	paragraph
+F	line	12
+F	end-line	19
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:14	FILE/runfile/types/journal.run
+F	block	answer
+F	line	14
+F	end-line	18
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:22	FILE/runfile/types/journal.run
+F	block	section
+F	line	22
+F	end-line	36
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:23	FILE/runfile/types/journal.run
+F	block	title
+F	line	23
+F	end-line	25
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:27	FILE/runfile/types/journal.run
+F	block	paragraph
+F	line	27
+F	end-line	35
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:30	FILE/runfile/types/journal.run
+F	block	answer
+F	line	30
+F	end-line	34
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:7	FILE/runfile/types/journal.run
+F	block	section
+F	line	7
+F	end-line	20
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/journal.run:8	FILE/runfile/types/journal.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:1	FILE/runfile/types/module.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/module.run:11	FILE/runfile/types/module.run
+F	block	section
+F	line	11
+F	end-line	29
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/module.run:12	FILE/runfile/types/module.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:16	FILE/runfile/types/module.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:18	FILE/runfile/types/module.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/module.run:25	FILE/runfile/types/module.run
+F	block	paragraph
+F	line	25
+F	end-line	28
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:31	FILE/runfile/types/module.run
+F	block	section
+F	line	31
+F	end-line	49
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/module.run:32	FILE/runfile/types/module.run
+F	block	title
+F	line	32
+F	end-line	34
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:36	FILE/runfile/types/module.run
+F	block	paragraph
+F	line	36
+F	end-line	38
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:40	FILE/runfile/types/module.run
+F	block	code
+F	line	40
+F	end-line	44
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:46	FILE/runfile/types/module.run
+F	block	comment
+F	line	46
+F	end-line	48
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/module.run:7	FILE/runfile/types/module.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:1	FILE/runfile/types/note.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:16	FILE/runfile/types/note.run
+F	block	paragraph
+F	line	16
+F	end-line	19
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:21	FILE/runfile/types/note.run
+F	block	comment
+F	line	21
+F	end-line	23
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:25	FILE/runfile/types/note.run
+F	block	code
+F	line	25
+F	end-line	28
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:7	FILE/runfile/types/note.run
+F	block	paragraph
+F	line	7
+F	end-line	14
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/note.run:9	FILE/runfile/types/note.run
+F	block	answer
+F	line	9
+F	end-line	13
+F	depth	1
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:1	FILE/runfile/types/plan.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:11	FILE/runfile/types/plan.run
+F	block	section
+F	line	11
+F	end-line	24
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:12	FILE/runfile/types/plan.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:16	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:18	FILE/runfile/types/plan.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:26	FILE/runfile/types/plan.run
+F	block	section
+F	line	26
+F	end-line	53
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:27	FILE/runfile/types/plan.run
+F	block	title
+F	line	27
+F	end-line	29
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:31	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	31
+F	end-line	39
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:34	FILE/runfile/types/plan.run
+F	block	answer
+F	line	34
+F	end-line	38
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:41	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	41
+F	end-line	44
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:46	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	46
+F	end-line	48
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:50	FILE/runfile/types/plan.run
+F	block	comment
+F	line	50
+F	end-line	52
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:55	FILE/runfile/types/plan.run
+F	block	section
+F	line	55
+F	end-line	68
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:56	FILE/runfile/types/plan.run
+F	block	title
+F	line	56
+F	end-line	58
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:60	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	60
+F	end-line	67
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:62	FILE/runfile/types/plan.run
+F	block	answer
+F	line	62
+F	end-line	66
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:7	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:70	FILE/runfile/types/plan.run
+F	block	section
+F	line	70
+F	end-line	84
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:71	FILE/runfile/types/plan.run
+F	block	title
+F	line	71
+F	end-line	73
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:75	FILE/runfile/types/plan.run
+F	block	paragraph
+F	line	75
+F	end-line	83
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/plan.run:78	FILE/runfile/types/plan.run
+F	block	answer
+F	line	78
+F	end-line	82
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:1	FILE/runfile/types/research.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:100	FILE/runfile/types/research.run
+F	block	section
+F	line	100
+F	end-line	113
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:101	FILE/runfile/types/research.run
+F	block	title
+F	line	101
+F	end-line	103
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:105	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	105
+F	end-line	112
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:107	FILE/runfile/types/research.run
+F	block	answer
+F	line	107
+F	end-line	111
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:11	FILE/runfile/types/research.run
+F	block	section
+F	line	11
+F	end-line	24
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:12	FILE/runfile/types/research.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:16	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	16
+F	end-line	23
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:18	FILE/runfile/types/research.run
+F	block	answer
+F	line	18
+F	end-line	22
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:26	FILE/runfile/types/research.run
+F	block	section
+F	line	26
+F	end-line	39
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:27	FILE/runfile/types/research.run
+F	block	title
+F	line	27
+F	end-line	29
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:31	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	31
+F	end-line	38
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:33	FILE/runfile/types/research.run
+F	block	answer
+F	line	33
+F	end-line	37
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:41	FILE/runfile/types/research.run
+F	block	section
+F	line	41
+F	end-line	63
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:42	FILE/runfile/types/research.run
+F	block	title
+F	line	42
+F	end-line	44
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:46	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	46
+F	end-line	53
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:48	FILE/runfile/types/research.run
+F	block	answer
+F	line	48
+F	end-line	52
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:55	FILE/runfile/types/research.run
+F	block	code
+F	line	55
+F	end-line	58
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:60	FILE/runfile/types/research.run
+F	block	comment
+F	line	60
+F	end-line	62
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:65	FILE/runfile/types/research.run
+F	block	section
+F	line	65
+F	end-line	78
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:66	FILE/runfile/types/research.run
+F	block	title
+F	line	66
+F	end-line	68
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:7	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:70	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	70
+F	end-line	77
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:72	FILE/runfile/types/research.run
+F	block	answer
+F	line	72
+F	end-line	76
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:80	FILE/runfile/types/research.run
+F	block	section
+F	line	80
+F	end-line	98
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/research.run:81	FILE/runfile/types/research.run
+F	block	title
+F	line	81
+F	end-line	83
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:85	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	85
+F	end-line	92
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/research.run:87	FILE/runfile/types/research.run
+F	block	answer
+F	line	87
+F	end-line	91
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/research.run:94	FILE/runfile/types/research.run
+F	block	paragraph
+F	line	94
+F	end-line	97
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:1	FILE/runfile/types/todo.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:11	FILE/runfile/types/todo.run
+F	block	section
+F	line	11
+F	end-line	33
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:12	FILE/runfile/types/todo.run
+F	block	title
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:16	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	16
+F	end-line	24
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:19	FILE/runfile/types/todo.run
+F	block	answer
+F	line	19
+F	end-line	23
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:26	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	26
+F	end-line	32
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:29	FILE/runfile/types/todo.run
+F	block	comment
+F	line	29
+F	end-line	31
+F	depth	2
+F	parent	paragraph
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:35	FILE/runfile/types/todo.run
+F	block	section
+F	line	35
+F	end-line	53
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:36	FILE/runfile/types/todo.run
+F	block	title
+F	line	36
+F	end-line	38
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:40	FILE/runfile/types/todo.run
+F	block	comment
+F	line	40
+F	end-line	52
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:43	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	43
+F	end-line	46
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:48	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	48
+F	end-line	51
+F	depth	2
+F	parent	comment
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:55	FILE/runfile/types/todo.run
+F	block	section
+F	line	55
+F	end-line	67
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:56	FILE/runfile/types/todo.run
+F	block	title
+F	line	56
+F	end-line	58
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:60	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	60
+F	end-line	62
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:64	FILE/runfile/types/todo.run
+F	block	comment
+F	line	64
+F	end-line	66
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/runfile/types/todo.run:7	FILE/runfile/types/todo.run
+F	block	paragraph
+F	line	7
+F	end-line	9
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:1	FILE/question-pages-plan.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:101	FILE/question-pages-plan.run
+F	block	section
+F	line	101
+F	end-line	122
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:102	FILE/question-pages-plan.run
+F	block	title
+F	line	102
+F	end-line	104
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:106	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	106
+F	end-line	108
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:110	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	110
+F	end-line	112
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:114	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	114
+F	end-line	116
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:118	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	118
+F	end-line	120
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:12	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	12
+F	end-line	14
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:124	FILE/question-pages-plan.run
+F	block	section
+F	line	124
+F	end-line	165
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:125	FILE/question-pages-plan.run
+F	block	title
+F	line	125
+F	end-line	127
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:129	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	129
+F	end-line	131
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:133	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	133
+F	end-line	135
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:137	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	137
+F	end-line	139
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:141	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	141
+F	end-line	143
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:145	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	145
+F	end-line	147
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:149	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	149
+F	end-line	151
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:153	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	153
+F	end-line	155
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:157	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	157
+F	end-line	159
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:16	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	16
+F	end-line	18
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:161	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	161
+F	end-line	163
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:167	FILE/question-pages-plan.run
+F	block	section
+F	line	167
+F	end-line	200
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:168	FILE/question-pages-plan.run
+F	block	title
+F	line	168
+F	end-line	170
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:172	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	172
+F	end-line	174
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:176	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	176
+F	end-line	178
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:180	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	180
+F	end-line	182
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:184	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	184
+F	end-line	186
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:188	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	188
+F	end-line	190
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:192	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	192
+F	end-line	194
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:196	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	196
+F	end-line	198
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:20	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	20
+F	end-line	22
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:202	FILE/question-pages-plan.run
+F	block	section
+F	line	202
+F	end-line	235
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:203	FILE/question-pages-plan.run
+F	block	title
+F	line	203
+F	end-line	205
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:207	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	207
+F	end-line	209
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:211	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	211
+F	end-line	213
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:215	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	215
+F	end-line	217
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:219	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	219
+F	end-line	221
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:223	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	223
+F	end-line	225
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:227	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	227
+F	end-line	229
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:231	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	231
+F	end-line	233
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:237	FILE/question-pages-plan.run
+F	block	section
+F	line	237
+F	end-line	278
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:238	FILE/question-pages-plan.run
+F	block	title
+F	line	238
+F	end-line	240
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:24	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	24
+F	end-line	26
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:242	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	242
+F	end-line	244
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:246	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	246
+F	end-line	248
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:250	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	250
+F	end-line	252
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:254	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	254
+F	end-line	256
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:258	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	258
+F	end-line	260
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:262	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	262
+F	end-line	264
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:266	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	266
+F	end-line	268
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:270	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	270
+F	end-line	272
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:274	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	274
+F	end-line	276
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:28	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	28
+F	end-line	30
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:280	FILE/question-pages-plan.run
+F	block	section
+F	line	280
+F	end-line	309
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:281	FILE/question-pages-plan.run
+F	block	title
+F	line	281
+F	end-line	283
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:285	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	285
+F	end-line	287
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:289	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	289
+F	end-line	291
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:293	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	293
+F	end-line	295
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:297	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	297
+F	end-line	299
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:301	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	301
+F	end-line	303
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:305	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	305
+F	end-line	307
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:311	FILE/question-pages-plan.run
+F	block	section
+F	line	311
+F	end-line	332
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:312	FILE/question-pages-plan.run
+F	block	title
+F	line	312
+F	end-line	314
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:316	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	316
+F	end-line	318
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:32	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	32
+F	end-line	34
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:320	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	320
+F	end-line	322
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:324	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	324
+F	end-line	326
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:328	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	328
+F	end-line	330
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:36	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	36
+F	end-line	38
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:40	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	40
+F	end-line	42
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:44	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	44
+F	end-line	46
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:48	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	48
+F	end-line	50
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:52	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	52
+F	end-line	54
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:58	FILE/question-pages-plan.run
+F	block	section
+F	line	58
+F	end-line	99
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:59	FILE/question-pages-plan.run
+F	block	title
+F	line	59
+F	end-line	61
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:63	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	63
+F	end-line	65
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:67	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	67
+F	end-line	69
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:7	FILE/question-pages-plan.run
+F	block	section
+F	line	7
+F	end-line	56
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/question-pages-plan.run:71	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	71
+F	end-line	73
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:75	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	75
+F	end-line	77
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:79	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	79
+F	end-line	81
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:8	FILE/question-pages-plan.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:83	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	83
+F	end-line	85
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:87	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	87
+F	end-line	89
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:91	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	91
+F	end-line	93
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/question-pages-plan.run:95	FILE/question-pages-plan.run
+F	block	paragraph
+F	line	95
+F	end-line	97
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:1	FILE/todo.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/todo.run:12	FILE/todo.run
+F	block	paragraph
+F	line	12
+F	end-line	15
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:17	FILE/todo.run
+F	block	paragraph
+F	line	17
+F	end-line	20
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:22	FILE/todo.run
+F	block	paragraph
+F	line	22
+F	end-line	25
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:27	FILE/todo.run
+F	block	paragraph
+F	line	27
+F	end-line	30
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:32	FILE/todo.run
+F	block	paragraph
+F	line	32
+F	end-line	35
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:37	FILE/todo.run
+F	block	paragraph
+F	line	37
+F	end-line	40
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:42	FILE/todo.run
+F	block	paragraph
+F	line	42
+F	end-line	45
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:47	FILE/todo.run
+F	block	paragraph
+F	line	47
+F	end-line	50
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:52	FILE/todo.run
+F	block	paragraph
+F	line	52
+F	end-line	55
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:57	FILE/todo.run
+F	block	paragraph
+F	line	57
+F	end-line	60
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:62	FILE/todo.run
+F	block	paragraph
+F	line	62
+F	end-line	65
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:67	FILE/todo.run
+F	block	paragraph
+F	line	67
+F	end-line	70
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:7	FILE/todo.run
+F	block	section
+F	line	7
+F	end-line	97
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	FILE/todo.run:72	FILE/todo.run
+F	block	paragraph
+F	line	72
+F	end-line	75
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:77	FILE/todo.run
+F	block	paragraph
+F	line	77
+F	end-line	80
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:8	FILE/todo.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:82	FILE/todo.run
+F	block	paragraph
+F	line	82
+F	end-line	85
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:87	FILE/todo.run
+F	block	paragraph
+F	line	87
+F	end-line	90
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	FILE/todo.run:92	FILE/todo.run
+F	block	paragraph
+F	line	92
+F	end-line	95
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:1	TERMINAL MULTIPLEXER/todo.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:12	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	12
+F	end-line	15
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:17	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	17
+F	end-line	20
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:22	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	22
+F	end-line	25
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:27	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	27
+F	end-line	30
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:32	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	32
+F	end-line	35
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:38	TERMINAL MULTIPLEXER/todo.run
+F	block	section
+F	line	38
+F	end-line	73
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:39	TERMINAL MULTIPLEXER/todo.run
+F	block	title
+F	line	39
+F	end-line	41
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:43	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	43
+F	end-line	46
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:48	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	48
+F	end-line	51
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:53	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	53
+F	end-line	56
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:58	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	58
+F	end-line	61
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:63	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	63
+F	end-line	66
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:68	TERMINAL MULTIPLEXER/todo.run
+F	block	paragraph
+F	line	68
+F	end-line	71
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:7	TERMINAL MULTIPLEXER/todo.run
+F	block	section
+F	line	7
+F	end-line	36
+F	depth	0
+F	parent	
+F	declared-name	
+R	block	TERMINAL MULTIPLEXER/todo.run:8	TERMINAL MULTIPLEXER/todo.run
+F	block	title
+F	line	8
+F	end-line	10
+F	depth	1
+F	parent	section
+F	declared-name	
+R	block	journal/2026-11-05.run:1	journal/2026-11-05.run
+F	block	title
+F	line	1
+F	end-line	5
+F	depth	0
+F	parent	
+F	declared-name	
+R	file	EDITOR/runtd-tutorial.run	EDITOR/runtd-tutorial.run
+F	kind	default
+F	lines	126
+F	bytes	2657
+F	blocks	33
+F	errors	0
+R	file	EDITOR/text-editor/test.run	EDITOR/text-editor/test.run
+F	kind	default
+F	lines	205
+F	bytes	5433
+F	blocks	48
+F	errors	0
+R	file	EDITOR/todo.run	EDITOR/todo.run
+F	kind	todo
+F	lines	526
+F	bytes	13817
+F	blocks	123
+F	errors	0
+R	file	FILE/runfile/types/book.run	FILE/runfile/types/book.run
+F	kind	book
+F	lines	52
+F	bytes	1188
+F	blocks	13
+F	errors	0
+R	file	FILE/runfile/types/comment.run	FILE/runfile/types/comment.run
+F	kind	default
+F	lines	59
+F	bytes	1564
+F	blocks	16
+F	errors	0
+R	file	FILE/runfile/types/decision.run	FILE/runfile/types/decision.run
+F	kind	decision
+F	lines	83
+F	bytes	2025
+F	blocks	21
+F	errors	0
+R	file	FILE/runfile/types/default.run	FILE/runfile/types/default.run
+F	kind	default
+F	lines	54
+F	bytes	1080
+F	blocks	14
+F	errors	0
+R	file	FILE/runfile/types/journal.run	FILE/runfile/types/journal.run
+F	kind	journal
+F	lines	36
+F	bytes	1043
+F	blocks	9
+F	errors	0
+R	file	FILE/runfile/types/module.run	FILE/runfile/types/module.run
+F	kind	module
+F	lines	49
+F	bytes	1141
+F	blocks	12
+F	errors	0
+R	file	FILE/runfile/types/note.run	FILE/runfile/types/note.run
+F	kind	note
+F	lines	28
+F	bytes	740
+F	blocks	6
+F	errors	0
+R	file	FILE/runfile/types/plan.run	FILE/runfile/types/plan.run
+F	kind	plan
+F	lines	84
+F	bytes	1813
+F	blocks	21
+F	errors	0
+R	file	FILE/runfile/types/research.run	FILE/runfile/types/research.run
+F	kind	research
+F	lines	113
+F	bytes	2843
+F	blocks	29
+F	errors	0
+R	file	FILE/runfile/types/todo.run	FILE/runfile/types/todo.run
+F	kind	todo
+F	lines	67
+F	bytes	1773
+F	blocks	17
+F	errors	0
+R	file	FILE/question-pages-plan.run	FILE/question-pages-plan.run
+F	kind	default
+F	lines	332
+F	bytes	12424
+F	blocks	85
+F	errors	0
+R	file	FILE/todo.run	FILE/todo.run
+F	kind	todo
+F	lines	97
+F	bytes	3870
+F	blocks	20
+F	errors	0
+R	file	TERMINAL MULTIPLEXER/todo.run	TERMINAL MULTIPLEXER/todo.run
+F	kind	todo
+F	lines	73
+F	bytes	2534
+F	blocks	16
+F	errors	0
+R	file	journal/2026-11-05.run	journal/2026-11-05.run
+F	kind	journal
+F	lines	5
+F	bytes	69
+F	blocks	1
+F	errors	0
+R	tag	EDITOR/runtd-tutorial.run:runtd	EDITOR/runtd-tutorial.run
+F	tag	runtd
+F	line	3
+R	tag	EDITOR/runtd-tutorial.run:docs	EDITOR/runtd-tutorial.run
+F	tag	docs
+F	line	3
+R	tag	EDITOR/runtd-tutorial.run:generated	EDITOR/runtd-tutorial.run
+F	tag	generated
+F	line	3
+R	tag	EDITOR/text-editor/test.run:editor	EDITOR/text-editor/test.run
+F	tag	editor
+F	line	3
+R	tag	EDITOR/text-editor/test.run:introduction	EDITOR/text-editor/test.run
+F	tag	introduction
+F	line	3
+R	tag	EDITOR/text-editor/test.run:test	EDITOR/text-editor/test.run
+F	tag	test
+F	line	3
+R	tag	EDITOR/todo.run:runtd	EDITOR/todo.run
+F	tag	runtd
+F	line	3
+R	tag	EDITOR/todo.run:planned	EDITOR/todo.run
+F	tag	planned
+F	line	3
+R	tag	EDITOR/todo.run:todo	EDITOR/todo.run
+F	tag	todo
+F	line	3
+R	tag	FILE/runfile/types/book.run:book	FILE/runfile/types/book.run
+F	tag	book
+F	line	3
+R	tag	FILE/runfile/types/book.run:chapter	FILE/runfile/types/book.run
+F	tag	chapter
+F	line	3
+R	tag	FILE/runfile/types/comment.run:comment	FILE/runfile/types/comment.run
+F	tag	comment
+F	line	3
+R	tag	FILE/runfile/types/comment.run:todo	FILE/runfile/types/comment.run
+F	tag	todo
+F	line	3
+R	tag	FILE/runfile/types/decision.run:decision	FILE/runfile/types/decision.run
+F	tag	decision
+F	line	3
+R	tag	FILE/runfile/types/decision.run:notes	FILE/runfile/types/decision.run
+F	tag	notes
+F	line	3
+R	tag	FILE/runfile/types/default.run:default	FILE/runfile/types/default.run
+F	tag	default
+F	line	3
+R	tag	FILE/runfile/types/default.run:example	FILE/runfile/types/default.run
+F	tag	example
+F	line	3
+R	tag	FILE/runfile/types/journal.run:journal	FILE/runfile/types/journal.run
+F	tag	journal
+F	line	3
+R	tag	FILE/runfile/types/journal.run:workshop	FILE/runfile/types/journal.run
+F	tag	workshop
+F	line	3
+R	tag	FILE/runfile/types/module.run:example	FILE/runfile/types/module.run
+F	tag	example
+F	line	3
+R	tag	FILE/runfile/types/module.run:module	FILE/runfile/types/module.run
+F	tag	module
+F	line	3
+R	tag	FILE/runfile/types/note.run:idea	FILE/runfile/types/note.run
+F	tag	idea
+F	line	3
+R	tag	FILE/runfile/types/note.run:note	FILE/runfile/types/note.run
+F	tag	note
+F	line	3
+R	tag	FILE/runfile/types/plan.run:plan	FILE/runfile/types/plan.run
+F	tag	plan
+F	line	3
+R	tag	FILE/runfile/types/plan.run:release	FILE/runfile/types/plan.run
+F	tag	release
+F	line	3
+R	tag	FILE/runfile/types/research.run:notes	FILE/runfile/types/research.run
+F	tag	notes
+F	line	3
+R	tag	FILE/runfile/types/research.run:research	FILE/runfile/types/research.run
+F	tag	research
+F	line	3
+R	tag	FILE/runfile/types/todo.run:todo	FILE/runfile/types/todo.run
+F	tag	todo
+F	line	3
+R	tag	FILE/runfile/types/todo.run:viewer	FILE/runfile/types/todo.run
+F	tag	viewer
+F	line	3
+R	tag	FILE/question-pages-plan.run:contracts	FILE/question-pages-plan.run
+F	tag	contracts
+F	line	3
+R	tag	FILE/question-pages-plan.run:runfile	FILE/question-pages-plan.run
+F	tag	runfile
+F	line	3
+R	tag	FILE/todo.run:planned	FILE/todo.run
+F	tag	planned
+F	line	3
+R	tag	FILE/todo.run:todo	FILE/todo.run
+F	tag	todo
+F	line	3
+R	tag	TERMINAL MULTIPLEXER/todo.run:planned	TERMINAL MULTIPLEXER/todo.run
+F	tag	planned
+F	line	3
+R	tag	TERMINAL MULTIPLEXER/todo.run:todo	TERMINAL MULTIPLEXER/todo.run
+F	tag	todo
+F	line	3
+R	tag	journal/2026-11-05.run:journal	journal/2026-11-05.run
+F	tag	journal
+F	line	3
+R	todo	EDITOR/text-editor/test.run:101	EDITOR/text-editor/test.run
+F	line	101
+F	text	done press d and see that this done todo is visited
+R	todo	EDITOR/text-editor/test.run:106	EDITOR/text-editor/test.run
+F	line	106
+F	text	open the cursor cannot land on the todo tray after a block move
+R	todo	EDITOR/text-editor/test.run:86	EDITOR/text-editor/test.run
+F	line	86
+F	text	open press o, then t, and see that only open todos are visited
+R	todo	EDITOR/text-editor/test.run:91	EDITOR/text-editor/test.run
+F	line	91
+F	text	open press w on this block, change this line, then press escape to save
+R	todo	EDITOR/text-editor/test.run:96	EDITOR/text-editor/test.run
+F	line	96
+F	text	press x and see that a todo with no word counts as open
+R	todo	EDITOR/todo.run:119	EDITOR/todo.run
+F	line	119
+F	text	open strip trailing comments after code and #| |# blocks in the source
+R	todo	EDITOR/todo.run:124	EDITOR/todo.run
+F	line	124
+F	text	open too many gates: keep one-way, language-split, secret-check, security-gate and delete the others the owner names
+R	todo	EDITOR/todo.run:129	EDITOR/todo.run
+F	line	129
+F	text	open put update, test and gate in ONE directory, check find-up for gate in update-table.rkt first
+R	todo	EDITOR/todo.run:13	EDITOR/todo.run
+F	line	13
+F	text	bionic reading rendering, EXTREMELY IMPORTANT: render text with Bionic Reading emphasis in the editor and the runfile viewer.
+R	todo	EDITOR/todo.run:134	EDITOR/todo.run
+F	line	134
+F	text	open check that bar-less and bar-more levels still behave with the new bar menu table
+R	todo	EDITOR/todo.run:139	EDITOR/todo.run
+F	line	139
+F	text	open pane-split test is missing: record one with keys that change the screen, the title block is pinned now
+R	todo	EDITOR/todo.run:144	EDITOR/todo.run
+F	line	144
+F	text	open tests for the project (SPC j) and workspace (SPC l) layers
+R	todo	EDITOR/todo.run:149	EDITOR/todo.run
+F	line	149
+F	text	open block cursor: h t w i, typing, escape, picks a p e c k l x o d
+R	todo	EDITOR/todo.run:154	EDITOR/todo.run
+F	line	154
+F	text	open check that OSC 52 copy reaches the phone clipboard through the multiplexer
+R	todo	EDITOR/todo.run:159	EDITOR/todo.run
+F	line	159
+F	text	open type with 5 cursors and say if it lags
+R	todo	EDITOR/todo.run:170	EDITOR/todo.run
+F	line	170
+F	text	open cut the 1.3 s between first paint and ready
+R	todo	EDITOR/todo.run:175	EDITOR/todo.run
+F	line	175
+F	text	open lower the priority of the background scan
+R	todo	EDITOR/todo.run:18	EDITOR/todo.run
+F	line	18
+F	text	research RSVP (Rapid Serial Visual Presentation).
+R	todo	EDITOR/todo.run:180	EDITOR/todo.run
+F	line	180
+F	text	open batched hot path op multi-edit for many cursors, only if typing lags
+R	todo	EDITOR/todo.run:185	EDITOR/todo.run
+F	line	185
+F	text	open hot path binary lives in /tmp: rebuild or set SUBNET_HOT_PATH_BIN
+R	todo	EDITOR/todo.run:196	EDITOR/todo.run
+F	line	196
+F	text	open cursor cannot land on the todo tray of a box after a block move
+R	todo	EDITOR/todo.run:201	EDITOR/todo.run
+F	line	201
+F	text	open comment that wraps blocks may light its parent block
+R	todo	EDITOR/todo.run:206	EDITOR/todo.run
+F	line	206
+F	text	open cursors while a block is edited, block cursor at the block start
+R	todo	EDITOR/todo.run:211	EDITOR/todo.run
+F	line	211
+F	text	open select a block as one unit for cut and paste, paste a block between pages
+R	todo	EDITOR/todo.run:216	EDITOR/todo.run
+F	line	216
+F	text	open copy ring: cycle with space P, visible list, keep between sessions
+R	todo	EDITOR/todo.run:221	EDITOR/todo.run
+F	line	221
+F	text	open copy of a selection made inside the undo layer
+R	todo	EDITOR/todo.run:226	EDITOR/todo.run
+F	line	226
+F	text	open raw line wider than the screen while a block is edited
+R	todo	EDITOR/todo.run:23	EDITOR/todo.run
+F	line	23
+F	text	research Spritz-style ORP alignment.
+R	todo	EDITOR/todo.run:237	EDITOR/todo.run
+F	line	237
+F	text	open answer the three questions of 13.9, then build step 1 marks.rkt with place-of and find-place
+R	todo	EDITOR/todo.run:242	EDITOR/todo.run
+F	line	242
+F	text	open mark-set, mark-jump, mark-delete, keys by loop, menu rows
+R	todo	EDITOR/todo.run:247	EDITOR/todo.run
+F	line	247
+F	text	open jumplist with jump-back and jump-forward
+R	todo	EDITOR/todo.run:252	EDITOR/todo.run
+F	line	252
+F	text	open global marks, named bookmarks, fzf list
+R	todo	EDITOR/todo.run:257	EDITOR/todo.run
+F	line	257
+F	text	open mark letters in the strip, bar count, dashboard section
+R	todo	EDITOR/todo.run:262	EDITOR/todo.run
+F	line	262
+F	text	open automatic marks: last change, last edit block, last visual block
+R	todo	EDITOR/todo.run:273	EDITOR/todo.run
+F	line	273
+F	text	open decide: keep or drop the history file of section 14
+R	todo	EDITOR/todo.run:278	EDITOR/todo.run
+F	line	278
+F	text	open decide: keep or remove SPC u level-up
+R	todo	EDITOR/todo.run:28	EDITOR/todo.run
+F	line	28
+F	text	research Bionic Reading.
+R	todo	EDITOR/todo.run:283	EDITOR/todo.run
+F	line	283
+F	text	open undo and redo keys u and r
+R	todo	EDITOR/todo.run:288	EDITOR/todo.run
+F	line	288
+F	text	open tree view as an RUN page
+R	todo	EDITOR/todo.run:293	EDITOR/todo.run
+F	line	293
+F	text	open git hunk and block revert from the git strip, restore from a commit
+R	todo	EDITOR/todo.run:298	EDITOR/todo.run
+F	line	298
+F	text	open tab switch and quit while writing also make the undo commit
+R	todo	EDITOR/todo.run:303	EDITOR/todo.run
+F	line	303
+F	text	open pruning of refs/run-undo-old, git worktree for an old state
+R	todo	EDITOR/todo.run:308	EDITOR/todo.run
+F	line	308
+F	text	open untracked files in the git row
+R	todo	EDITOR/todo.run:313	EDITOR/todo.run
+F	line	313
+F	text	open remove dead code of section 17 if still there
+R	todo	EDITOR/todo.run:324	EDITOR/todo.run
+F	line	324
+F	text	open tab completion for .run from the runfile engine
+R	todo	EDITOR/todo.run:329	EDITOR/todo.run
+F	line	329
+F	text	open LSP server with the same completion core
+R	todo	EDITOR/todo.run:33	EDITOR/todo.run
+F	line	33
+F	text	research tachistoscopic reading.
+R	todo	EDITOR/todo.run:334	EDITOR/todo.run
+F	line	334
+F	text	open search and replace with n and N
+R	todo	EDITOR/todo.run:339	EDITOR/todo.run
+F	line	339
+F	text	open folding, split view, macros, outline list
+R	todo	EDITOR/todo.run:344	EDITOR/todo.run
+F	line	344
+F	text	open git stage and blame
+R	todo	EDITOR/todo.run:349	EDITOR/todo.run
+F	line	349
+F	text	open reload when the file changes on disk
+R	todo	EDITOR/todo.run:354	EDITOR/todo.run
+F	line	354
+F	text	open spell check
+R	todo	EDITOR/todo.run:359	EDITOR/todo.run
+F	line	359
+F	text	open project and workspace rows of the tab bar switch pages
+R	todo	EDITOR/todo.run:364	EDITOR/todo.run
+F	line	364
+F	text	open scan limits (800 pages, 8 repositories, 4 folders deep) configurable
+R	todo	EDITOR/todo.run:375	EDITOR/todo.run
+F	line	375
+F	text	open add undo.rkt, multi.rkt, clip.rkt to compile-deps of cli.rkt
+R	todo	EDITOR/todo.run:38	EDITOR/todo.run
+F	line	38
+F	text	design a single-word-at-a-time reading interface.
+R	todo	EDITOR/todo.run:380	EDITOR/todo.run
+F	line	380
+F	text	open key tables of undo, cursor and select layers in the docs
+R	todo	EDITOR/todo.run:405	EDITOR/todo.run
+F	line	405
+F	text	open runfile requires a title for every box type
+R	todo	EDITOR/todo.run:416	EDITOR/todo.run
+F	line	416
+F	text	tab management needs more features. There is no workspace management, no project management and no keys for them. These need real work: open, switch, close and list workspaces and projects, each with keys. Owner request 2026-11-02.
+R	todo	EDITOR/todo.run:417	EDITOR/todo.run
+F	line	417
+F	text	the mode line shows the available keys but only the keys alone. It needs a full table of every key with what it does, per layer. Owner request 2026-11-02.
+R	todo	EDITOR/todo.run:427	EDITOR/todo.run
+F	line	427
+F	text	a .run-memory file kept in the directory the owner works in (workspace or project). It remembers the open tabs, workspaces and projects, so nothing is lost when runtd exits and everything comes back when it is opened in that directory again. Owner request 2026-11-02, top priority.
+R	todo	EDITOR/todo.run:428	EDITOR/todo.run
+F	line	428
+F	text	feature 1 of .run-memory: the work placement is never lost on exit. Open tabs, their order, the current tab, the cursor and view place of each, and the open workspaces and projects are saved and restored.
+R	todo	EDITOR/todo.run:429	EDITOR/todo.run
+F	line	429
+F	text	feature 2 of .run-memory: workspace settings. A directory or workspace can say which projects it holds and which files and tabs open by themselves when runtd starts there. The format and the rules need thinking first: where the file lives, what it holds, and how it relates to the plain text .run format. It must not use .org files and must not edit FILE.
+R	todo	EDITOR/todo.run:43	EDITOR/todo.run
+F	line	43
+F	text	implement adjustable reading speed (WPM).
+R	todo	EDITOR/todo.run:439	EDITOR/todo.run
+F	line	439
+F	text	clone https://github.com/Canop/broot and https://github.com/alexpasmantier/television into  FILE MANAGER/.
+R	todo	EDITOR/todo.run:440	EDITOR/todo.run
+F	line	440
+F	text	combine them into one file manager, then add oil.nvim style editing: the directory is edited as a text buffer and saving applies the renames, moves, deletes and creates.
+R	todo	EDITOR/todo.run:441	EDITOR/todo.run
+F	line	441
+F	text	make runtd use this file manager.
+R	todo	EDITOR/todo.run:451	EDITOR/todo.run
+F	line	451
+F	text	first check that the keybindings are set properly.
+R	todo	EDITOR/todo.run:452	EDITOR/todo.run
+F	line	452
+F	text	then sort the files into subfolders by subject. Many files share a subject and sit loose in one folder, so each subject gets its own subdirectory.
+R	todo	EDITOR/todo.run:453	EDITOR/todo.run
+F	line	453
+F	text	after that, move the key sets into their categories: the keys for tabs go in the tabs folder, and so on, so no key has to be hunted for.
+R	todo	EDITOR/todo.run:454	EDITOR/todo.run
+F	line	454
+F	text	move the test files the same way. Every file gets its own test file from that point, so the mechanic can test each file properly.
+R	todo	EDITOR/todo.run:464	EDITOR/todo.run
+F	line	464
+F	text	every file of the editor that belongs to FILE (its modules, checks, tests and docs) gets runfile in its file name, because these files sit in many folders. Then one search for runfile finds all of them when FILE is updated. Do not edit FILE itself.
+R	todo	EDITOR/todo.run:465	EDITOR/todo.run
+F	line	465
+F	text	do this together with the subject subfolders, and keep the one-way rule: the editor requires the runfile files, never the other way round.
+R	todo	EDITOR/todo.run:475	EDITOR/todo.run
+F	line	475
+F	text	test system per-frame state line. The test system should show the editor state on each frame, so a failed test says what the state was at every step.
+R	todo	EDITOR/todo.run:476	EDITOR/todo.run
+F	line	476
+F	text	Rust tests in the gate. The Rust side of the editor gets its own tests, run by the gate stages like the Racket ones.
+R	todo	EDITOR/todo.run:477	EDITOR/todo.run
+F	line	477
+F	text	errortrace run. Run the editor under errortrace once and fix what it finds. The details are in plan.md.
+R	todo	EDITOR/todo.run:478	EDITOR/todo.run
+F	line	478
+F	text	gutter files. gutter.rkt and gutterview.rkt are loose in editor/tui. Give the gutter its own folder, and give each file its own test file.
+R	todo	EDITOR/todo.run:48	EDITOR/todo.run
+F	line	48
+F	text	implement highlighted consonants and word emphasis.
+R	todo	EDITOR/todo.run:487	EDITOR/todo.run
+F	line	487
+F	text	the one-way lint prints NOTHING-TO-CHECK, so it enforces nothing. Find why it sees no Racket files (the project path holds the letter AE), put tui into its area table at its true place (entry and routes already require tui, and the key tables now live in tui folders), and make it fail for real on an upward require.
+R	todo	EDITOR/todo.run:496	EDITOR/todo.run
+F	line	496
+F	text	test file per source file. A key test drives the live editor, so most modules cannot have one. Module tests are recorded with runtd record-module NAME MODULE-PATH EXPRESSION (one file, one test, gate/tests/mod-NAME.test). A first batch is recorded; the rest of the Racket files follow, the live and tui files with key tests from runtd record. The Rust files get their tests with the Rust tests in the gate item.
+R	todo	EDITOR/todo.run:505	EDITOR/todo.run
+F	line	505
+F	text	copy and paste mechanism. The mechanism in editor/tui/text/clip.rkt (the ring of copies, paste per cursor, the OSC 52 clipboard, the notes in clip-notes.rkt) needs improvements. The owner decides what changes; related items are copy-cut-paste and the OSC 52 clipboard check. Give it its own test file.
+R	todo	EDITOR/todo.run:514	EDITOR/todo.run
+F	line	514
+F	text	notification history. A command shows the last notifications of the active session in a box (level, text and time), kept in a small ring in the notify mechanism. Not urgent at all, do it last.
+R	todo	EDITOR/todo.run:517	EDITOR/todo.run
+F	line	517
+F	text	literate code view: all files are written in .run with literate programming like org mode; a key in the text editor hides the runfile and shows only the code, like a normal code file
+R	todo	EDITOR/todo.run:522	EDITOR/todo.run
+F	line	522
+F	text	the editor writes the name: declaration when a block is made
+R	todo	EDITOR/todo.run:53	EDITOR/todo.run
+F	line	53
+F	text	implement punctuation-aware pauses.
+R	todo	EDITOR/todo.run:58	EDITOR/todo.run
+F	line	58
+F	text	implement adjustable word display duration.
+R	todo	EDITOR/todo.run:63	EDITOR/todo.run
+F	line	63
+F	text	add sentence and paragraph navigation.
+R	todo	EDITOR/todo.run:68	EDITOR/todo.run
+F	line	68
+F	text	add pause, resume, forward and backward controls.
+R	todo	EDITOR/todo.run:73	EDITOR/todo.run
+F	line	73
+F	text	add reading progress statistics.
+R	todo	EDITOR/todo.run:78	EDITOR/todo.run
+F	line	78
+F	text	test reading comprehension at different speeds.
+R	todo	EDITOR/todo.run:83	EDITOR/todo.run
+F	line	83
+F	text	explore Emacs integration.
+R	todo	EDITOR/todo.run:88	EDITOR/todo.run
+F	line	88
+F	text	explore RUN Runfile compatibility.
+R	todo	EDITOR/todo.run:93	EDITOR/todo.run
+F	line	93
+F	text	combine RSVP and Bionic Reading into one reading mode.
+R	todo	FILE/runfile/types/book.run:43	FILE/runfile/types/book.run
+F	line	43
+F	text	add a short example page
+R	todo	FILE/runfile/types/comment.run:48	FILE/runfile/types/comment.run
+F	line	48
+F	text	write the install guide and test it on a clean machine before Friday
+R	todo	FILE/runfile/types/comment.run:56	FILE/runfile/types/comment.run
+F	line	56
+F	text	done viewer fixed, names now sit on the left
+R	todo	FILE/runfile/types/decision.run:45	FILE/runfile/types/decision.run
+F	line	45
+F	text	ask whether pictures need a fourth option
+R	todo	FILE/runfile/types/decision.run:80	FILE/runfile/types/decision.run
+F	line	80
+F	text	done folder created and the first fifty notes moved
+R	todo	FILE/runfile/types/default.run:26	FILE/runfile/types/default.run
+F	line	26
+F	text	done add a section inside a section
+R	todo	FILE/runfile/types/journal.run:28	FILE/runfile/types/journal.run
+F	line	28
+F	text	write the other starter pages
+R	todo	FILE/runfile/types/module.run:26	FILE/runfile/types/module.run
+F	line	26
+F	text	decide whether it should refuse a text input
+R	todo	FILE/runfile/types/note.run:17	FILE/runfile/types/note.run
+F	line	17
+F	text	link this idea to the page that uses it
+R	todo	FILE/runfile/types/plan.run:32	FILE/runfile/types/plan.run
+F	line	32
+F	text	done guide written
+R	todo	FILE/runfile/types/plan.run:42	FILE/runfile/types/plan.run
+F	line	42
+F	text	waiting for a clean machine
+R	todo	FILE/runfile/types/plan.run:76	FILE/runfile/types/plan.run
+F	line	76
+F	text	ask Anna by Monday
+R	todo	FILE/runfile/types/research.run:95	FILE/runfile/types/research.run
+F	line	95
+F	text	find three people to repeat the test
+R	todo	FILE/runfile/types/todo.run:17	FILE/runfile/types/todo.run
+F	line	17
+F	text	write the install guide and test it on a clean machine before Friday
+R	todo	FILE/runfile/types/todo.run:27	FILE/runfile/types/todo.run
+F	line	27
+F	text	waiting for Anna to name the second operating system
+R	todo	FILE/runfile/types/todo.run:44	FILE/runfile/types/todo.run
+F	line	44
+F	text	done viewer fixed, block names now sit on the left
+R	todo	FILE/runfile/types/todo.run:49	FILE/runfile/types/todo.run
+F	line	49
+F	text	done contracts now show on every page
+R	todo	FILE/todo.run:13	FILE/todo.run
+F	line	13
+F	text	runfile question pages: the questions each paragraph, section and to-do type must answer live in an editable page at the base of a directory, not hard coded; every file in that directory and its subdirectories takes those questions, and the runfile system reports an error where a file lacks an answer after the page changes. Idea only, not designed yet.
+R	todo	FILE/todo.run:18	FILE/todo.run
+F	line	18
+F	text	question page loader: contracts-of reads rules and questions from a questions.run page found at the nearest directory base up the tree, replacing the hard coded the-contracts lists in filetypes/types.
+R	todo	FILE/todo.run:23	FILE/todo.run
+F	line	23
+F	text	missing question error: check reports a finding where a paragraph, section or to-do type has no question in the page, and where an answer points at a question id that no longer exists.
+R	todo	FILE/todo.run:28	FILE/todo.run
+F	line	28
+F	text	stale types readme: filetypes/types/README.md still names runfile system/ and gate/check.nu; point it at the real paths and at the question pages.
+R	todo	FILE/todo.run:33	FILE/todo.run
+F	line	33
+F	text	delete hard coded contracts: seed .questions.run from the current rules and questions with their ids, then remove every the-contracts list from filetypes/types.
+R	todo	FILE/todo.run:38	FILE/todo.run
+F	line	38
+F	text	runfile create command and TUI: list file types and block kinds, add, edit or remove a rule or question, write the nearest dot page; plan in question-pages-plan.run.
+R	todo	FILE/todo.run:43	FILE/todo.run
+F	line	43
+F	text	runfile database: engine written from zero in Rust inside runfile, no outside engine, no SQLite; order of work agreed: engine core, indexers one kind at a time, names, links and sync, red delete popup, autosave; see plan sections 3, 4 and 10.
+R	todo	FILE/todo.run:48	FILE/todo.run
+F	line	48
+F	text	box names: every block kind gets a name declaration, unique and readable, written in the file; it is the id and the link target; see plan section 5.
+R	todo	FILE/todo.run:53	FILE/todo.run
+F	line	53
+F	text	link blocks: link start and link end name a target box and can show it inside another file; the editor suggests names while typing.
+R	todo	FILE/todo.run:58	FILE/todo.run
+F	line	58
+F	text	idle autosave: after 5 seconds without typing in write mode, show a notification, leave write mode and save.
+R	todo	FILE/todo.run:63	FILE/todo.run
+F	line	63
+F	text	safe delete: refuse deleting anything not tracked by git unless approved; if shown in other files, ask yes or no in a red popup first.
+R	todo	FILE/todo.run:68	FILE/todo.run
+F	line	68
+F	text	own file manager for safe delete: the git tracked check, the untracked approval word and the red popup for boxes shown elsewhere live in our own file manager; see plan section 10.
+R	todo	FILE/todo.run:73	FILE/todo.run
+F	line	73
+F	text	block type drawing: view.rs, boxview.rs, rich.rs, json.rkt, run-text.rkt and make-live.rkt still match block names in code; move how each type is drawn into its blocktypes file so a new type needs no code edit.
+R	todo	FILE/todo.run:78	FILE/todo.run
+F	line	78
+F	text	database indexers: one source file per kind in runfile/database, files first, then blocks, links, tags and todos; each rebuilds only its own kind of one source file through Store.replace_source.
+R	todo	FILE/todo.run:83	FILE/todo.run
+F	line	83
+F	text	register link as a block type in .runfile/blocktypes and Racket elements/register.rkt, then make the links indexer read parsed link blocks instead of text lines
+R	todo	FILE/todo.run:88	FILE/todo.run
+F	line	88
+F	text	the folder index loads block types from the folder nearest to the first file only; load them per file or per folder
+R	todo	FILE/todo.run:93	FILE/todo.run
+F	line	93
+F	text	names: fill name: on old blocks that have none, and make a duplicate name a check error instead of a stderr line
+R	todo	TERMINAL MULTIPLEXER/todo.run:13	TERMINAL MULTIPLEXER/todo.run
+F	line	13
+F	text	bar placement from the editor bar plan, tabs on top and mode line at the bottom, instead of all rows stacked on top
+R	todo	TERMINAL MULTIPLEXER/todo.run:18	TERMINAL MULTIPLEXER/todo.run
+F	line	18
+F	text	prefix commands for tabs, workspaces, projects and splits through the copied editor tab code, with a second shell pane
+R	todo	TERMINAL MULTIPLEXER/todo.run:23	TERMINAL MULTIPLEXER/todo.run
+F	line	23
+F	text	decide per part what stays Racket and what goes to Rust, only server side where speed is needed, for example a pty holder that survives the client
+R	todo	TERMINAL MULTIPLEXER/todo.run:28	TERMINAL MULTIPLEXER/todo.run
+F	line	28
+F	text	combining marks and mouse and bracketed paste in the pane
+R	todo	TERMINAL MULTIPLEXER/todo.run:33	TERMINAL MULTIPLEXER/todo.run
+F	line	33
+F	text	the ecosystem gate finds the multiplexer project by itself, no second gate
+R	todo	TERMINAL MULTIPLEXER/todo.run:44	TERMINAL MULTIPLEXER/todo.run
+F	line	44
+F	text	layout engine wired: the editor splits and the multiplexer panes both call tui/layout/layout-tree-shared.rkt, a pure tree of strips with axis, windows, sizes and an insertion direction, rectangles with scrolling to the focused window
+R	todo	TERMINAL MULTIPLEXER/todo.run:49	TERMINAL MULTIPLEXER/todo.run
+F	line	49
+F	text	floating layer in the editor and the multiplexer, identical shared files: one float above the tiles with size and anchor, hide keeps its state, size and tabs persist, on a narrow screen it grows to near full width
+R	todo	TERMINAL MULTIPLEXER/todo.run:54	TERMINAL MULTIPLEXER/todo.run
+F	line	54
+F	text	float tabs and named floats: todo, journal and notes each with its own key, the to-do file opens at once, journal opens a dated file created when missing, a capture key appends one line without focusing the float, in the multiplexer a float is a hidden pane running the editor on the to-do file
+R	todo	TERMINAL MULTIPLEXER/todo.run:59	TERMINAL MULTIPLEXER/todo.run
+F	line	59
+F	text	float resizer: step keys and presets small, medium, large and full on one key, saved size, entries in the keys menu, title and tabs on the border in the box style
+R	todo	TERMINAL MULTIPLEXER/todo.run:64	TERMINAL MULTIPLEXER/todo.run
+F	line	64
+F	text	tiling in the editor replacing tui/split: strips in both directions, focus, move, consume and expel, size presets one third, half, two thirds and full, maximize and center, tabbed strip for many files
+R	todo	TERMINAL MULTIPLEXER/todo.run:69	TERMINAL MULTIPLEXER/todo.run
+F	line	69
+F	text	tiling in the multiplexer panes: the same engine, window layer keys d n h t for focus, shift moves the window, a resize layer, the insertion direction shown in the mode bar, layout saved per workspace and project

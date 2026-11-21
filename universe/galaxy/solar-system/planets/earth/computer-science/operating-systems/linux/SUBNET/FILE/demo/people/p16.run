@@ -1,0 +1,26 @@
+title start
+Demo people 16
+title end
+
+paragraph start
+Page 16 of people.
+paragraph end
+
+link start
+name: l1-p16
+target: demo/people/p04.run
+face: ref
+link end
+
+link start
+name: l2-p16
+target: demo/people/p09.run
+face: ref
+link end
+
+link start
+name: l3-p16
+target: demo/events/e24.run
+face: far
+link end
+

@@ -1,0 +1,110 @@
+layout start
+name: demo-people
+caption: Folder people with 24 linked pages.
+card start
+target: demo/people/p01.run
+place: 0 0
+card end
+card start
+target: demo/people/p02.run
+place: 1 0
+card end
+card start
+target: demo/people/p03.run
+place: 2 0
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p04.run
+place: 3 0
+card end
+card start
+target: demo/people/p05.run
+place: 4 0
+card end
+card start
+target: demo/people/p06.run
+place: 0 1
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p07.run
+place: 1 1
+caption: A very long caption written only to test the card height. It keeps going across many lines so the box has to grow a lot, the row below has to move down, and the arrows still have to hit the middle of every card on the map.
+card end
+card start
+target: demo/people/p08.run
+place: 2 1
+card end
+card start
+target: demo/people/p09.run
+place: 3 1
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p10.run
+place: 4 1
+card end
+card start
+target: demo/people/p11.run
+place: 0 2
+card end
+card start
+target: demo/people/p12.run
+place: 1 2
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p13.run
+place: 2 2
+card end
+card start
+target: demo/people/p14.run
+place: 3 2
+caption: A very long caption written only to test the card height. It keeps going across many lines so the box has to grow a lot, the row below has to move down, and the arrows still have to hit the middle of every card on the map.
+card end
+card start
+target: demo/people/p15.run
+place: 4 2
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p16.run
+place: 0 3
+card end
+card start
+target: demo/people/p17.run
+place: 1 3
+card end
+card start
+target: demo/people/p18.run
+place: 2 3
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+card start
+target: demo/people/p19.run
+place: 3 3
+card end
+card start
+target: demo/people/p20.run
+place: 4 3
+card end
+card start
+target: demo/people/p21.run
+place: 0 4
+caption: A very long caption written only to test the card height. It keeps going across many lines so the box has to grow a lot, the row below has to move down, and the arrows still have to hit the middle of every card on the map.
+card end
+card start
+target: demo/people/p22.run
+place: 1 4
+card end
+card start
+target: demo/people/p23.run
+place: 2 4
+card end
+card start
+target: demo/people/p24.run
+place: 3 4
+caption: A medium caption that needs two or three lines inside this card to be read in full.
+card end
+layout end

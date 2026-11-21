@@ -1,0 +1,58 @@
+[package]
+authors.workspace = true
+description = "Nushell's extra commands that are not part of the 1.0 api standard."
+edition.workspace = true
+license.workspace = true
+name = "shell-cmd-extra"
+repository = "https://github.com/nushell/shell/tree/main/crates/shell-cmd-extra"
+rust-version.workspace = true
+version.workspace = true
+autotests = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+bench = false
+harness = false
+
+[lints]
+workspace = true
+
+[[test]]
+name = "tests"
+path = "tests/main.rs"
+harness = false
+
+[dependencies]
+shell-cmd-base.workspace = true
+shell-engine.workspace = true
+shell-heavy-utils = { workspace = true, features = ["endian"] }
+shell-json.workspace = true
+shell-parser.workspace = true
+shell-pretty-hex.workspace = true
+shell-protocol.workspace = true
+shell-utils.workspace = true
+
+# Potential dependencies for extras
+heck = { workspace = true }
+num-traits = { workspace = true }
+nu-ansi-term = { workspace = true }
+fancy-regex = { workspace = true }
+serde = { workspace = true }
+serde_urlencoded = { workspace = true }
+v_htmlescape = { workspace = true }
+itertools = { workspace = true }
+mime = { workspace = true }
+
+[dev-dependencies]
+# "os" feature required for testing examples
+shell-cmd-lang = { workspace = true, features = ["os"] }
+shell-command = { workspace = true, features = ["os"] }
+shell-test-support = { path = "../shell-test-support" }
+
+[build-dependencies]
+shell-protocol.workspace = true
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+quote = { workspace = true }

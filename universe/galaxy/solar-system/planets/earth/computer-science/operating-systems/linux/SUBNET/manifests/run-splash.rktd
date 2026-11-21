@@ -1,0 +1,10 @@
+(spec
+  (format-version 2)
+  (name run-splash)
+  (version "2.10.4")
+  (summary "the RUN splash screen")
+  (source (local "/root/home/shape/Ætherion/universe/galaxy/solar-system/planets/earth/computer-science/operating-systems/linux/SUBNET/shell/splashboard"))
+  (build (steps (run #:argv ("cargo" "build" "--offline" "--release" "--target-dir" "target" "--manifest-path" "Cargo.toml"))))
+  (install (prefix (bin "target/release/splashboard" "bin/run-splash")))
+  (license isc)
+  (homepage "https://example.invalid/"))

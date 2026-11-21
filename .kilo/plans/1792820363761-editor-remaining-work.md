@@ -1,7 +1,7 @@
-# Plan: Text editor remaining work — AIU EDITOR
+# Plan: Text editor remaining work — EDITOR
 
 ## Goal
-Complete the remaining TODO.org items for the AIU text editor, after the terminal multiplexer resumes work (priority switch 2026-10-21). Do not implement source changes — this plan is for an implementation-capable agent to execute.
+Complete the remaining TODO.org items for the RUN text editor, after the terminal multiplexer resumes work (priority switch 2026-10-21). Do not implement source changes — this plan is for an implementation-capable agent to execute.
 
 ## Constraints
 - Editor is PAUSED until multiplexer builds, its gate is green, and persistent sessions + attach/detach are proved on the phone (resume conditions in TODO.org lines 34-38).
@@ -33,8 +33,8 @@ Editor's four surfaces (envelope, MCP server, skill, read-only watcher) + capabi
 Deps: items 9–14.
 
 ### 16 — Done line [PARTLY DONE]
-Editor's clauses hold. Left: multiplexer basic version + select/send from mux; notation core hosted in editor (Notation item 11 — editor may not touch it); "to both OpenCode and Hermes" (Hermes skipped 2026-10-20); owner deletes shared `checklist/` (root file, read-only from here).
-Deps: all above + Notation item 11.
+Editor's clauses hold. Left: multiplexer basic version + select/send from mux; runfile core hosted in editor (Runfile item 11 — editor may not touch it); "to both OpenCode and Hermes" (Hermes skipped 2026-10-20); owner deletes shared `checklist/` (root file, read-only from here).
+Deps: all above + Runfile item 11.
 
 ### 24 — Config reloaded live in dev mode [TODO]
 Config change in force without restarting editor; reload on record.
@@ -57,7 +57,7 @@ Run editor's light gate after each completed item:
 ```
 Gate must be green (14 stages at pause). Build outside tree:
 ```
-cd "AIU EDITOR"
+cd "EDITOR"
 cargo build --manifest-path editor/Cargo.toml --target-dir /tmp/editor-target
 rm -f editor/Cargo.lock
 ```

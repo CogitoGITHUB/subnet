@@ -1,0 +1,585 @@
+title start
+kind: todo
+tags: todo runtd planned
+RUNTD TODO
+title end
+chapter start
+name: section-links-and-runfile
+title start
+name: title-links-and-runfile
+From RUNFILE: links and runfile tie-ins
+title end
+paragraph start
+todo: link blocks: link start and link end name a target box and can show it inside another file; the editor suggests names while typing.
+Planned.
+paragraph end
+paragraph start
+todo: idle autosave: after 5 seconds without typing in write mode, show a notification, leave write mode and save.
+Planned.
+paragraph end
+paragraph start
+todo: safe delete: refuse deleting anything not tracked by git unless approved; if shown in other files, ask yes or no in a red popup first.
+Planned.
+paragraph end
+paragraph start
+todo: own file manager for safe delete: the git tracked check, the untracked approval word and the red popup for boxes shown elsewhere live in our own file manager; see plan section 10.
+Planned.
+paragraph end
+paragraph start
+todo: table writing: a good way to write a table in the editor in the table start form of data/table.rkt. Insert a skeleton with caption, columns, header and one row, and check cells against columns. No HTML or LaTeX work
+Planned.
+paragraph end
+paragraph start
+todo: link jump trail: keys back and original. Back goes one jump,
+original goes to where the trail started. The trail is progress,
+kept outside the page. Check if buffer.rs holds a cursor position
+the trail can reuse.
+Planned.
+paragraph end
+paragraph start
+todo: link backlinks: draw the places a block is linked from next to
+the block, computed from the database, never typed.
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Reading mode: RSVP and Bionic Reading
+title end
+
+paragraph start
+todo: bionic reading rendering, EXTREMELY IMPORTANT: render text with Bionic Reading emphasis in the editor and the runfile viewer.
+Planned.
+paragraph end
+
+paragraph start
+todo: research RSVP (Rapid Serial Visual Presentation).
+Planned.
+paragraph end
+
+paragraph start
+todo: research Spritz-style ORP alignment.
+Planned.
+paragraph end
+
+paragraph start
+todo: research Bionic Reading.
+Planned.
+paragraph end
+
+paragraph start
+todo: research tachistoscopic reading.
+Planned.
+paragraph end
+
+paragraph start
+todo: design a single-word-at-a-time reading interface.
+Planned.
+paragraph end
+
+paragraph start
+todo: implement adjustable reading speed (WPM).
+Planned.
+paragraph end
+
+paragraph start
+todo: implement highlighted consonants and word emphasis.
+Planned.
+paragraph end
+
+paragraph start
+todo: implement punctuation-aware pauses.
+Planned.
+paragraph end
+
+paragraph start
+todo: implement adjustable word display duration.
+Planned.
+paragraph end
+
+paragraph start
+todo: add sentence and paragraph navigation.
+Planned.
+paragraph end
+
+paragraph start
+todo: add pause, resume, forward and backward controls.
+Planned.
+paragraph end
+
+paragraph start
+todo: add reading progress statistics.
+Planned.
+paragraph end
+
+paragraph start
+todo: test reading comprehension at different speeds.
+Planned.
+paragraph end
+
+paragraph start
+todo: explore Emacs integration.
+Planned.
+paragraph end
+
+paragraph start
+todo: explore RUN Runfile compatibility.
+Planned.
+paragraph end
+
+paragraph start
+todo: combine RSVP and Bionic Reading into one reading mode.
+Planned.
+paragraph end
+
+chapter end
+
+comment start
+Every planned feature, first taken from the old docs (now deleted). Later this page is written by code from the feature registry, and a feature leaves it when its tests pass.
+comment end
+
+chapter start
+title start
+BORDER ALL THE TIME
+title end
+chapter end
+
+chapter start
+title start
+Try by hand and fix
+title end
+
+paragraph start
+Planned.
+paragraph end
+
+paragraph start
+todo: open strip trailing comments after code and #| |# blocks in the source
+Planned.
+paragraph end
+
+paragraph start
+todo: open too many gates: keep one-way, language-split, secret-check, security-gate and delete the others the owner names
+Planned.
+paragraph end
+
+paragraph start
+todo: open put update, test and gate in ONE directory, check find-up for gate in update-table.rkt first
+Planned.
+paragraph end
+
+paragraph start
+todo: open check that bar-less and bar-more levels still behave with the new bar menu table
+Planned.
+paragraph end
+
+paragraph start
+todo: open pane-split test is missing: record one with keys that change the screen, the title block is pinned now
+Planned.
+paragraph end
+
+paragraph start
+todo: open tests for the project (SPC j) and workspace (SPC l) layers
+Planned.
+paragraph end
+
+paragraph start
+todo: open block cursor: h t w i, typing, escape, picks a p e c k l x o d
+Planned.
+paragraph end
+
+paragraph start
+todo: open check that OSC 52 copy reaches the phone clipboard through the multiplexer
+Planned.
+paragraph end
+
+paragraph start
+todo: open type with 5 cursors and say if it lags
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Speed and start path
+title end
+
+paragraph start
+todo: open cut the 1.3 s between first paint and ready
+Planned.
+paragraph end
+
+paragraph start
+todo: open lower the priority of the background scan
+Planned.
+paragraph end
+
+paragraph start
+todo: open batched hot path op multi-edit for many cursors, only if typing lags
+Planned.
+paragraph end
+
+paragraph start
+todo: open hot path binary lives in /tmp: rebuild or set SUBNET_HOT_PATH_BIN
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Blocks and cursors
+title end
+
+paragraph start
+todo: open cursor cannot land on the todo tray of a box after a block move
+Planned.
+paragraph end
+
+paragraph start
+todo: open comment that wraps blocks may light its parent block
+Planned.
+paragraph end
+
+paragraph start
+todo: open cursors while a block is edited, block cursor at the block start
+Planned.
+paragraph end
+
+paragraph start
+todo: open select a block as one unit for cut and paste, paste a block between pages
+Planned.
+paragraph end
+
+paragraph start
+todo: open copy ring: cycle with space P, visible list, keep between sessions
+Planned.
+paragraph end
+
+paragraph start
+todo: open copy of a selection made inside the undo layer
+Planned.
+paragraph end
+
+paragraph start
+todo: open raw line wider than the screen while a block is edited
+Planned.
+paragraph end
+
+paragraph start
+todo: open boxes side by side: n and s stay move-left and move-right and must move between boxes placed next to each other
+Planned.
+paragraph end
+
+paragraph start
+todo: open motion mode beside edit and view: free movement inside and between boxes, apart from the m layer that swaps blocks
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Marks and bookmarks (docs/parts/plans-from-old-readmes.md)
+title end
+
+paragraph start
+todo: open answer the three questions of 13.9, then build step 1 marks.rkt with place-of and find-place
+Planned.
+paragraph end
+
+paragraph start
+todo: open mark-set, mark-jump, mark-delete, keys by loop, menu rows
+Planned.
+paragraph end
+
+paragraph start
+todo: open jumplist with jump-back and jump-forward
+Planned.
+paragraph end
+
+paragraph start
+todo: open global marks, named bookmarks, fzf list
+Planned.
+paragraph end
+
+paragraph start
+todo: open mark letters in the strip, bar count, dashboard section
+Planned.
+paragraph end
+
+paragraph start
+todo: open automatic marks: last change, last edit block, last visual block
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Undo and git
+title end
+
+paragraph start
+todo: open decide: keep or drop the history file of section 14
+Planned.
+paragraph end
+
+paragraph start
+todo: open decide: keep or remove SPC u level-up
+Planned.
+paragraph end
+
+paragraph start
+todo: open undo and redo keys u and r
+Planned.
+paragraph end
+
+paragraph start
+todo: open tree view as an RUN page
+Planned.
+paragraph end
+
+paragraph start
+todo: open git hunk and block revert from the git strip, restore from a commit
+Planned.
+paragraph end
+
+paragraph start
+todo: open tab switch and quit while writing also make the undo commit
+Planned.
+paragraph end
+
+paragraph start
+todo: open pruning of refs/run-undo-old, git worktree for an old state
+Planned.
+paragraph end
+
+paragraph start
+todo: open untracked files in the git row
+Planned.
+paragraph end
+
+paragraph start
+todo: open remove dead code of section 17 if still there
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+New editor features
+title end
+
+paragraph start
+todo: open tab completion for .run from the runfile engine
+Planned.
+paragraph end
+
+paragraph start
+todo: open LSP server with the same completion core
+Planned.
+paragraph end
+
+paragraph start
+todo: open search and replace with n and N
+Planned.
+paragraph end
+
+paragraph start
+todo: open folding, split view, macros, outline list
+Planned.
+paragraph end
+
+paragraph start
+todo: open git stage and blame
+Planned.
+paragraph end
+
+paragraph start
+todo: open reload when the file changes on disk
+Planned.
+paragraph end
+
+paragraph start
+todo: open spell check
+Planned.
+paragraph end
+
+paragraph start
+todo: open project and workspace rows of the tab bar switch pages
+Planned.
+paragraph end
+
+paragraph start
+todo: open scan limits (800 pages, 8 repositories, 4 folders deep) configurable
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Housekeeping
+title end
+
+paragraph start
+todo: open add undo.rkt, multi.rkt, clip.rkt to compile-deps of cli.rkt
+Planned.
+paragraph end
+
+paragraph start
+todo: open key tables of undo, cursor and select layers in the docs
+Planned.
+paragraph end
+chapter end
+
+chapter start
+title start
+Focus mode
+title end
+
+chapter end
+
+chapter start
+title start
+Testing paused
+title end
+
+chapter end
+
+chapter start
+title start
+Focus box types
+title end
+
+paragraph start
+todo: open runfile requires a title for every box type
+So that focus level 2 can show a title for each box type, the runfile system has to require a title for every box type. This changes FILE, a sibling folder, so it is a decision to take there and not a patch from the editor. Owner request 2026-11-01.
+paragraph end
+chapter end
+
+chapter start
+title start
+Tab management and the key table
+title end
+
+paragraph start
+todo: tab management needs more features. There is no workspace management, no project management and no keys for them. These need real work: open, switch, close and list workspaces and projects, each with keys. Owner request 2026-11-02.
+todo: the mode line shows the available keys but only the keys alone. It needs a full table of every key with what it does, per layer. Owner request 2026-11-02.
+paragraph end
+chapter end
+
+chapter start
+title start
+INSANELY IMPORTANT: the .run-memory file
+title end
+
+paragraph start
+todo: a .run-memory file kept in the directory the owner works in (workspace or project). It remembers the open tabs, workspaces and projects, so nothing is lost when runtd exits and everything comes back when it is opened in that directory again. Owner request 2026-11-02, top priority.
+todo: feature 1 of .run-memory: the work placement is never lost on exit. Open tabs, their order, the current tab, the cursor and view place of each, and the open workspaces and projects are saved and restored.
+todo: feature 2 of .run-memory: workspace settings. A directory or workspace can say which projects it holds and which files and tabs open by themselves when runtd starts there. The format and the rules need thinking first: where the file lives, what it holds, and how it relates to the plain text .run format. It must not use .org files and must not edit FILE.
+paragraph end
+chapter end
+
+chapter start
+title start
+URGENT: file manager in SUBNET / FILE MANAGER/
+title end
+
+paragraph start
+todo: clone https://github.com/Canop/broot and https://github.com/alexpasmantier/television into  FILE MANAGER/.
+todo: combine them into one file manager, then add oil.nvim style editing: the directory is edited as a text buffer and saving applies the renames, moves, deletes and creates.
+todo: make runtd use this file manager.
+paragraph end
+chapter end
+
+chapter start
+title start
+AFTER THE FILE BREAKING: keys, folders and one test per file
+title end
+
+paragraph start
+todo: first check that the keybindings are set properly.
+todo: then sort the files into subfolders by subject. Many files share a subject and sit loose in one folder, so each subject gets its own subdirectory.
+todo: after that, move the key sets into their categories: the keys for tabs go in the tabs folder, and so on, so no key has to be hunted for.
+todo: move the test files the same way. Every file gets its own test file from that point, so the mechanic can test each file properly.
+paragraph end
+chapter end
+
+chapter start
+title start
+FILE files carry runfile in their names
+title end
+
+paragraph start
+todo: every file of the editor that belongs to FILE (its modules, checks, tests and docs) gets runfile in its file name, because these files sit in many folders. Then one search for runfile finds all of them when FILE is updated. Do not edit FILE itself.
+todo: do this together with the subject subfolders, and keep the one-way rule: the editor requires the runfile files, never the other way round.
+paragraph end
+chapter end
+
+chapter start
+title start
+Still to do: tests, gate and tui leftovers
+title end
+
+paragraph start
+todo: test system per-frame state line. The test system should show the editor state on each frame, so a failed test says what the state was at every step.
+todo: Rust tests in the gate. The Rust side of the editor gets its own tests, run by the gate stages like the Racket ones.
+todo: errortrace run. Run the editor under errortrace once and fix what it finds. The details are in plan.md.
+todo: gutter files. gutter.rkt and gutterview.rkt are loose in editor/tui. Give the gutter its own folder, and give each file its own test file.
+paragraph end
+chapter end
+
+chapter start
+title start
+ONE-WAY LINT CHECKS NOTHING
+title end
+paragraph start
+todo: the one-way lint prints NOTHING-TO-CHECK, so it enforces nothing. Find why it sees no Racket files (the project path holds the letter AE), put tui into its area table at its true place (entry and routes already require tui, and the key tables now live in tui folders), and make it fail for real on an upward require.
+paragraph end
+chapter end
+
+chapter start
+title start
+TEST FILE PER SOURCE FILE
+title end
+paragraph start
+todo: test file per source file. A key test drives the live editor, so most modules cannot have one. Module tests are recorded with runtd record-module NAME MODULE-PATH EXPRESSION (one file, one test, gate/tests/mod-NAME.test). A first batch is recorded; the rest of the Racket files follow, the live and tui files with key tests from runtd record. The Rust files get their tests with the Rust tests in the gate item.
+paragraph end
+chapter end
+
+chapter start
+title start
+COPY AND PASTE MECHANISM
+title end
+paragraph start
+todo: copy and paste mechanism. The mechanism in editor/tui/text/clip.rkt (the ring of copies, paste per cursor, the OSC 52 clipboard, the notes in clip-notes.rkt) needs improvements. The owner decides what changes; related items are copy-cut-paste and the OSC 52 clipboard check. Give it its own test file.
+paragraph end
+chapter end
+
+chapter start
+title start
+NOTIFICATION HISTORY
+title end
+paragraph start
+todo: notification history. A command shows the last notifications of the active session in a box (level, text and time), kept in a small ring in the notify mechanism. Not urgent at all, do it last.
+paragraph end
+paragraph start
+todo: literate code view: all files are written in .run with literate programming like org mode; a key in the text editor hides the runfile and shows only the code, like a normal code file
+Planned.
+paragraph end
+
+paragraph start
+todo: the editor writes the name: declaration when a block is made
+Planned.
+paragraph end
+
+paragraph start
+todo: editor server: the editor has its own server and can connect to the shared subnet server and database; plan in subnet-server-plan.run
+Planned.
+paragraph end
+
+paragraph start
+todo: idle autosave: in write mode, 5 seconds without a key shows a notification, ends write mode and saves the file; the 5 seconds is a setting and counts keystrokes only; every autosave also syncs the shown copies in other files
+Planned.
+paragraph end
+
+chapter end

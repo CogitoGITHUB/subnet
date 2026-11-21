@@ -1,0 +1,21 @@
+[metadata]
+name = "run-list-kind"
+description = "Blocks or file types"
+
+[source]
+command = "cat run-list-kind.txt"
+display = "{split:;:0}"
+output = "{split:;:0}"
+
+[preview]
+cached = false
+command = "bash run-list-preview-fit.sh kind \"{}\""
+
+[keybindings]
+enter = "actions:pick"
+
+[actions.pick]
+description = "write the chosen kind to /tmp/run-list-kind"
+command = "printf %s {} > /tmp/run-list-kind"
+shell = "bash"
+mode = "execute"

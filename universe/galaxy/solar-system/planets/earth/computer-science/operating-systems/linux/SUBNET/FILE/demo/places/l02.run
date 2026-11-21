@@ -1,0 +1,26 @@
+title start
+Demo places 02
+title end
+
+paragraph start
+Page 02 of places.
+paragraph end
+
+link start
+name: l1-l02
+target: demo/places/l22.run
+face: ref
+link end
+
+link start
+name: l2-l02
+target: demo/places/l08.run
+face: ref
+link end
+
+link start
+name: l3-l02
+target: demo/events/e13.run
+face: far
+link end
+

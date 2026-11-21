@@ -1,0 +1,19 @@
+title start
+Demo Delta
+title end
+
+paragraph start
+Fourth demo page.
+paragraph end
+
+link start
+name: l1-delta
+target: demo/epsilon.run
+face: next
+link end
+
+link start
+name: l2-delta
+target: demo/alpha.run
+face: also
+link end

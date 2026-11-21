@@ -1,0 +1,19 @@
+title start
+kind: note
+tags: business-plan strategy ai-prompt-library
+Strategy ai prompt library
+title end
+
+paragraph start
+The first prompt runs a competitor audit.
+paragraph end
+
+code start
+language: text
+Read the runfile usage guide and the competitor profile template first.
+Take the competitor and the platform I give you.
+Fill one profile page using only what is visible on their public pages.
+Mark every unknown field as unknown.
+Stop after the page is written and checked.
+code end
+

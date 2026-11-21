@@ -1,0 +1,26 @@
+title start
+Demo tools 07
+title end
+
+paragraph start
+Page 07 of tools.
+paragraph end
+
+link start
+name: l1-t07
+target: demo/tools/t05.run
+face: ref
+link end
+
+link start
+name: l2-t07
+target: demo/tools/t24.run
+face: ref
+link end
+
+link start
+name: l3-t07
+target: demo/ideas/i08.run
+face: far
+link end
+

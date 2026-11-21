@@ -1,0 +1,254 @@
+title start
+kind: default
+tags: shell tui
+Plan: the shell TUI
+title end
+
+section start
+title start
+Section 1: decided
+title end
+
+paragraph start
+The shell gets its own TUI. shell owns the screen and draws every box itself. It works alone and does not need the multiplexer; the multiplexer can host and combine it.
+paragraph end
+
+paragraph start
+Every command makes a pair of boxes: a command box holding what was typed and an output box holding what it printed. Both have a title edge and side bars on every row.
+paragraph end
+
+paragraph start
+The shell starts in visual mode, not insert mode, because most of the time he goes back through history and boxes. A key enters insert mode to type, and escape returns to visual mode.
+paragraph end
+
+paragraph start
+Navigation between boxes uses the Dvorak keys: d and n move left and right, h and t move down and up.
+paragraph end
+
+paragraph start
+A key selects the current box. Selected boxes can be copied: the command box alone, the output box alone, or the pair. Copy goes to the clipboard, so a command given by the assistant and its output can be separated and pasted back without selecting text by hand.
+paragraph end
+
+paragraph start
+It is built piece by piece. Each piece is run and checked on screen before the next piece starts.
+paragraph end
+
+section end
+
+section start
+title start
+Section 2: what exists now
+title end
+
+paragraph start
+The shell crate shell-tui already holds ratatui and crossterm based TUI commands: tui run owns the terminal and returns one record. It is a possible base for the boxes.
+paragraph end
+
+paragraph start
+The REPL loop is in shell-cli repl.rs: evaluate_repl and loop_iteration run the line editor reedline once per command. The reedline box patch is a stopgap and is dropped when the own TUI exists.
+paragraph end
+
+section end
+
+section start
+title start
+Section 3: pieces in order
+title end
+
+paragraph start
+Piece 1: the screen. Boxes drawn with fixed text, title edges, side bars, resize, no shell inside yet.
+paragraph end
+
+paragraph start
+Piece 2: the input box with modes. Visual mode is the start, insert mode types, escape goes back, history is browsed in visual mode.
+paragraph end
+
+paragraph start
+Piece 3: running a command. Input goes to the shell engine, the output is captured and drawn in a new output box under its command box.
+paragraph end
+
+paragraph start
+Piece 4: box navigation and selection with d n h t and a select key.
+paragraph end
+
+paragraph start
+Piece 5: copy keys for the command box, the output box and the pair.
+paragraph end
+
+paragraph start
+Piece 6: scrolling inside long output boxes and a key to fold or open a box.
+paragraph end
+
+paragraph start
+Piece 7: programs that need a real terminal, such as editors and pagers, run in a pty and take the screen until they end.
+paragraph end
+
+section end
+
+section start
+title start
+Section 4: still open
+title end
+
+paragraph start
+Which language the TUI layer is written in, and whether it is built on the existing shell-tui crate or draws its own cells.
+paragraph end
+
+paragraph start
+How copy reaches the clipboard on his phone setup, inside Termux and proot.
+paragraph end
+
+paragraph start
+How the multiplexer hosts the shell TUI and how the two divide the screen when run together.
+paragraph end
+
+paragraph start
+How stderr is shown and how exit code and time appear on the output box edge.
+paragraph end
+
+paragraph start
+How the boxes are saved, so history browsing after a restart brings back whole pairs of boxes.
+paragraph end
+
+section end
+
+
+section start
+title start
+Section 4: piece 1 built
+title end
+
+paragraph start
+Piece 1 lives in the new crate shell/shell/crates/shell-screen (ratatui and crossterm, own draw code, no engine). The old crate shell-tui is a pipeline command set with a 3038 line session and is not the base; it stays untouched. The binary shell-screen with the argument dump prints the screen headless; without an argument it opens the screen and Esc quits. Fixed text only, nothing runs inside.
+paragraph end
+
+section end
+
+section start
+title start
+Section 5: piece 2 built
+title end
+
+paragraph start
+Piece 2 lives in shell-screen: input_state.rs holds the modes and history as a pure state machine with tests, screen_draw.rs draws the pairs above and the input box below. Visual mode is the start: t older history, h newer history, i insert, q quit. Insert mode: typing, backspace, enter keeps the line as a new pair with the output not run yet, escape back to visual. Nothing runs yet; piece 3 runs the command.
+paragraph end
+
+section end
+
+section start
+title start
+Section 6: piece 3 built
+title end
+
+paragraph start
+Piece 3 lives in shell-screen: command_runner.rs starts shell with no config file and -c for the line, captures stdout and stderr, strips escape codes, cuts at 200 rows and appends the exit code. InputState new_running makes Enter in insert mode run the line and fill the output box. The binary argument run with a line prints the result headless. A fresh process per line is the first step; one kept engine comes next.
+paragraph end
+
+section end
+
+section start
+title start
+Section 7: piece 4 built
+title end
+
+paragraph start
+Piece 4 lives in shell-screen: input_state.rs has Mode Boxes with focus (box index, pair times two plus side) and marked boxes; b enters from visual mode, t and h move by pair, d and n switch between command box and output box, s marks or unmarks, escape returns and keeps the marks; screen_draw.rs draws the focused box yellow and bold and marked boxes magenta.
+paragraph end
+
+section end
+
+section start
+title start
+Section 8: history view built
+title end
+
+paragraph start
+The history view lives in shell-screen: history_view.rs reads the shell-history database with rusqlite (newest first, unique commands, exit mark, age, folder), filters while typing (substring matches first, then fuzzy), and screen_draw.rs draws it above the input box with the best match at the bottom. Slash in visual mode and ctrl+r in insert or boxes mode open it, up and down move, enter puts the command into the input box, escape closes and restores the typed text.
+paragraph end
+
+section end
+
+section start
+title start
+Section 9: copy mode built
+title end
+
+paragraph start
+Piece 5 lives in shell-screen: in boxes mode c copies the focused box, p copies the pair and a copies the marked boxes. clipboard_copy.rs writes the OSC 52 escape with its own base64 and also pipes the text to termux-clipboard-set when it exists. The title shows how many characters were copied.
+paragraph end
+
+section end
+
+section start
+title start
+Section 10: run splash
+title end
+
+paragraph start
+The splash screen is built into the shell and rebranded as RUN. Source: shell/splashboard, cloned from unhappychoice/splashboard. The hook in the nushell config is removed at the end.
+paragraph end
+
+paragraph start
+The git part sits on top of the run context section. The home part sits below the whole shell box and stays attached to it. Both are one line when retracted. Both open and close with keys, in their own mode. The key for the mode is not chosen yet. Space is kept small, so they stay retracted by default.
+paragraph end
+
+paragraph start
+Both parts are cached. The home part loads once when the shell opens. The git part refreshes when the folder changes, and the jump with zoxide is the normal way. Expanding or resizing never reloads.
+paragraph end
+
+paragraph start
+The subnet server fetches and caches the data. Without the server the shell uses its own cache. Both show real splash output. run-splash dump project or home WIDTH prints the dashboard as plain text, the shell boxes show it. Retracted shows the first line. Git is the project dashboard, home is the home dashboard. Git is cached by folder, home loads once. j toggles git, k toggles home.
+paragraph end
+
+
+paragraph start
+Keys decided. In the shell, j and k enter the splash mode. In the multiplexer, u opens the splash in a floating pane at 80 percent of the screen and u hides it. The splash adapts to every float size (40, 60, 80, 100 and grow or shrink) with no extra setup. Both keys are checked free before the code is written.
+paragraph end
+
+paragraph start
+The splash binary is the package run-splash, built from shell/splashboard through manifests/run-splash.rktd. The multiplexer float runs run-splash watch, which is the full screen mode of the splashboard source. The shell parts link the same source as a library.
+paragraph end
+
+paragraph start
+Home dashboard boxes: rounded border, title on the left as a dash and bar before the name, same look as the runfile boxview frame. Applied in the home dashboard file in the splashboard folder. The project dashboard gets the same look after the GitHub token decision.
+paragraph end
+
+paragraph start
+Splash overlay: j opens the full git dashboard, k the full home dashboard, each over the whole screen with warning lines hidden. Up, Down, PageUp, PageDown scroll it. j or k closes it. The bar keeps showing one line each.
+paragraph end
+
+paragraph start
+Notifications: every shell notice is a box in the top right corner, titled with its level, wrapped, stacked up to three, gone after 2 seconds for info, 3 for warn, 5 for error. Same as the text editor notify module. Error is red. The bottom input box no longer shows notices.
+paragraph end
+
+paragraph start
+Box scroll: an expanded box taller than the screen opens at its top. Up, Down, PageUp, PageDown scroll it, and so do b (up) and g (down). The same keys scroll the splash overlay.
+paragraph end
+
+paragraph start
+Quit confirm: q in the multiplexer opens a centered box that asks to quit. Enter or space quits, n stays.
+paragraph end
+section end
+
+section start
+title start
+Section 11: pinned reminders
+title end
+
+paragraph start
+A pin box at the bottom of the shell screen holds pinned reminders. It is hidden when nothing is pinned.
+paragraph end
+
+paragraph start
+A key opens the box to add a pin. The key is not chosen yet.
+paragraph end
+
+paragraph start
+The shell has a command for it: pin TEXT adds a reminder, pin list shows them, unpin N removes one. Claude uses the same command to pin things for him.
+paragraph end
+
+paragraph start
+Pins are kept in one plain file, so they survive restarts and the multiplexer shows the same pins. The file location is chosen when it is built.
+paragraph end
+
+section end

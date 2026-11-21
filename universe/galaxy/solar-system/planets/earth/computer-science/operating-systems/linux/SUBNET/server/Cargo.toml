@@ -1,0 +1,12 @@
+[package]
+name = "subnet-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "subnet-server"
+path = "main.rs"
+
+[dependencies]
+runfile = { path = "../../FILE/runfile" }

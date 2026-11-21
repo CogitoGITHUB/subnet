@@ -1,0 +1,10 @@
+(spec
+  (format-version 2)
+  (name runfile)
+  (version "0.1.0")
+  (summary "the RUN runfile system")
+  (source (local "/root/home/shape/Ætherion/universe/galaxy/solar-system/planets/earth/computer-science/operating-systems/linux/SUBNET/FILE"))
+  (build (steps (run #:argv ("nice" "-n" "19" "cargo" "build" "--offline" "--release" "-j" "2" "--target-dir" "runfile/target" "--manifest-path" "runfile/Cargo.toml"))))
+  (install (prefix (copy-tree "runfile" "runfile") (bin "runfile/target/release/runfile" "bin/runfile")))
+  (license mit)
+  (homepage "https://example.invalid/"))

@@ -1,0 +1,26 @@
+title start
+Demo people 09
+title end
+
+paragraph start
+Page 09 of people.
+paragraph end
+
+link start
+name: l1-p09
+target: demo/people/p13.run
+face: ref
+link end
+
+link start
+name: l2-p09
+target: demo/people/p22.run
+face: ref
+link end
+
+link start
+name: l3-p09
+target: demo/events/e22.run
+face: far
+link end
+

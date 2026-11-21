@@ -1,0 +1,42 @@
+[package]
+authors.workspace = true
+description = "Nushell's evaluation engine"
+repository = "https://github.com/nushell/shell/tree/main/crates/shell-engine"
+edition.workspace = true
+license.workspace = true
+name = "shell-engine"
+rust-version.workspace = true
+autotests = false
+version.workspace = true
+
+[lib]
+bench = false
+harness = false
+
+[lints]
+workspace = true
+
+[dependencies]
+shell-protocol.workspace = true
+shell-experimental.workspace = true
+shell-path.workspace = true
+shell-glob.workspace = true
+shell-utils.workspace = true
+fancy-regex = { workspace = true }
+log = { workspace = true }
+
+[features]
+default = ["os"]
+os = [
+  "shell-protocol/os",
+  "shell-test-support/os",
+  "shell-utils/os",
+]
+plugin = [
+  "shell-protocol/plugin",
+  "os",
+]
+
+[dev-dependencies]
+shell-test-support = { path = "../shell-test-support" }
+rstest.workspace = true

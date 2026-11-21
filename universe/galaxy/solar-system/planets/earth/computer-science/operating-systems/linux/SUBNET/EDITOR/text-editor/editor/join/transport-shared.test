@@ -1,0 +1,6 @@
+test mod-transport
+level 2
+module editor/join/transport-shared.rkt
+call (list (voice-text "/tmp/run-no-voice") (read-response-file "/tmp/run-no-ans"))
+expect result equals ("" #f)
+expect seconds-under 20

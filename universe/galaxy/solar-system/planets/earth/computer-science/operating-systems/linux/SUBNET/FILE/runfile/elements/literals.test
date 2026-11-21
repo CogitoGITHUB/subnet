@@ -1,0 +1,6 @@
+test mod-literals
+level 2
+module ../../FILE/runfile/elements/literals.rkt
+call (procedure? name-char?)
+expect result equals #t
+expect seconds-under 20

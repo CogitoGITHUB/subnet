@@ -1,0 +1,38 @@
+[package]
+authors.workspace = true
+description = "Nushell's parser"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-parser"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console-parser"
+version.workspace = true
+exclude = ["/fuzz"]
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-engine.workspace = true
+console-path.workspace = true
+console-plugin-engine = { workspace = true, optional = true }
+console-protocol.workspace = true
+console-utils.workspace = true
+console-experimental.workspace = true
+
+chrono = { default-features = false, features = ['std'], workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+memchr = { workspace = true }
+rustc-hash = { workspace = true }
+semver = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true, default-features = false }
+
+[features]
+plugin = ["console-plugin-engine", "console-engine/plugin"]

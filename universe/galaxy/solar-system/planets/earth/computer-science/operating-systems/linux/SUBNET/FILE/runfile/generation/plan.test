@@ -1,6 +1,0 @@
-test mod-gplan
-level 2
-module ../../FILE/runfile/generation/plan.rkt
-call (procedure? build-plan)
-expect result equals #t
-expect seconds-under 20

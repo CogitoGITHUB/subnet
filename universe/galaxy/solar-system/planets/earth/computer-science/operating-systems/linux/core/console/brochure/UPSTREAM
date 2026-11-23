@@ -1,0 +1,5 @@
+repo=https://github.com/Sylviromi/brochure
+version=0.14.0
+commit=2b7f43f9e28b69599f3749611c334f9ad4d036ce
+copied=2026-11-23
+check=git ls-remote https://github.com/Sylviromi/brochure HEAD

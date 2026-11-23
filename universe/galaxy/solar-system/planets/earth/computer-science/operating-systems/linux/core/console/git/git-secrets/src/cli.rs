@@ -1,0 +1,1358 @@
+use crate::{
+    CatOptions, CleanOptions, DecryptOptions, DiffOptions, EditOptions, EncryptOptions, EnvOptions,
+    Project, PullOptions, PushOptions, RunOptions, StatusOptions, SyncOptions, VerifyOptions, cat,
+    clean_path, decrypt_path, diff, edit as edit_task, encrypt_path, env as env_task,
+    load_identities, load_recipients, prefix_revert, prefix_sync, print_result, pull_path,
+    push_path, rotate_path, run as run_task, status_path, sync_path, tee, verify_path,
+};
+use age::secrecy::ExposeSecret;
+use age::secrecy::SecretSlice;
+use anyhow::Result;
+use clap::CommandFactory;
+use clap::Parser;
+use clap::builder::styling::*;
+use clap_verbosity_flag::{Verbosity, WarnLevel};
+use crate::style::Paint;
+use std::io::{IsTerminal, Read, Write};
+use std::path::PathBuf;
+
+const STYLES: Styles = Styles::styled()
+    .header(clap::builder::styling::Style::new().effects(clap::builder::styling::Effects::BOLD))
+    .usage(clap::builder::styling::Style::new().effects(clap::builder::styling::Effects::BOLD))
+    .literal(clap::builder::styling::Style::new().effects(clap::builder::styling::Effects::BOLD))
+    .placeholder(clap::builder::styling::Style::new().effects(clap::builder::styling::Effects::DIMMED));
+
+#[derive(clap::Parser, Debug)]
+#[command(name="aiusec", author, version, about, styles = STYLES, long_about = None, arg_required_else_help = true)]
+struct GitSecretsCli {
+    #[command(subcommand)]
+    command: Command,
+
+    #[command(flatten)]
+    verbosity: Verbosity<WarnLevel>,
+}
+
+#[derive(clap::Parser, Debug)]
+#[command(name="aiusecx", author, version, about, styles = STYLES, long_about = None, arg_required_else_help = true)]
+struct GitSecretsXCli {
+    #[command(flatten)]
+    run: RunArgs,
+
+    #[command(flatten)]
+    verbosity: Verbosity<WarnLevel>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Initialize git_secrets in the current directory.
+    #[command(name = "init")]
+    Init,
+
+    /// Generate or re-generate key-pair in an existing git_secrets project.
+    #[command(name = "keygen")]
+    Keygen(KeygenArgs),
+
+    /// Edit a file and encrypt it.
+    #[command(name = "edit", aliases = ["ed"])]
+    Edit(EditArgs),
+
+    /// Encrypt files.
+    #[command(name = "encrypt", aliases = ["en", "enc"])]
+    Encrypt(EncryptArgs),
+
+    /// Decrypt files.
+    #[command(name = "decrypt", aliases = ["de", "dec"])]
+    Decrypt(DecryptArgs),
+
+    /// Decrypt a secret and print it to stdout.
+    #[command(name = "cat")]
+    Cat(CatArgs),
+
+    /// Encrypt stdin into a secret file.
+    #[command(name = "tee")]
+    Tee(TeeArgs),
+
+    /// Re-encrypt a secret for the current recipients without writing cleartext to disk.
+    #[command(name = "rotate")]
+    Rotate(RotateArgs),
+
+    /// Sync encrypted and decrypted files.
+    #[command(name = "sync", aliases = ["sy", "syn"])]
+    Sync(SyncArgs),
+
+    /// See pending actions based on timestamps only.
+    /// To get the actual diff, use `aiusec diff`.
+    #[command(name = "status", aliases = ["st"])]
+    Status(StatusArgs),
+
+    /// See diff between encrypted and decrypted files.
+    #[command(name = "diff", aliases = ["di"])]
+    Diff(DiffArgs),
+
+    /// Verify the checksum matches for encrypted files and recipients.
+    #[command(name = "verify")]
+    Verify(VerifyArgs),
+
+    /// Delete all secrets and identity files.
+    #[command(name = "clean", aliases = ["cl"])]
+    Clean(CleanArgs),
+
+    /// Manage the `path.prefix` directories of encrypted secrets and metadata.
+    #[command(
+        name = "prefix",
+        subcommand_required = true,
+        arg_required_else_help = true
+    )]
+    Prefix {
+        #[command(subcommand)]
+        command: PrefixCommand,
+    },
+
+    /// Decrypt secrets, run a command and delete decrypted secrets.
+    #[command(name = "run", trailing_var_arg = true)]
+    Run(RunArgs),
+
+    /// Run command with decrypted secrets exported as environment variables.
+    #[command(name = "env", trailing_var_arg = true)]
+    Env(EnvArgs),
+
+    /// Pull secrets from upstream.
+    #[command(name = "pull")]
+    Pull(PullArgs),
+
+    /// Push secrets to upstream.
+    #[command(name = "push")]
+    Push(PushArgs),
+
+    #[cfg(feature = "autocomplete")]
+    /// Generate shell completions.
+    /// Example: `eval "$(aiusec autocomplete bash)"` to load completions for bash.
+    #[command(name = "autocomplete")]
+    AutoComplete {
+        /// The shell to generate completions for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum PrefixCommand {
+    /// Move stray secrets and metadata to their prefixed paths.
+    #[command(name = "sync")]
+    Sync(PrefixSyncArgs),
+
+    /// Move secrets and metadata back to their unprefixed paths.
+    /// Run this before removing `path.prefix` from git_secrets.toml.
+    #[command(name = "revert")]
+    Revert(PrefixRevertArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct PrefixSyncArgs {
+    /// The file or dir to look for stray secrets and metadata, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Dry run, don't actually move anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct PrefixRevertArgs {
+    /// Dry run, don't actually move anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct CleanArgs {
+    /// The file or dir to clean, defaults to project root.
+    path: Vec<PathBuf>,
+
+    #[arg(long)]
+    /// Also delete encrypted files.
+    encrypted: bool,
+
+    #[arg(long)]
+    /// Also remove entries from .gitignore.
+    gitignore: bool,
+
+    #[arg(long)]
+    /// Cleanup everything git_secrets ever did.
+    all: bool,
+
+    /// Dry run, don't actually delete anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+}
+
+#[derive(clap::Args, Debug, Default)]
+struct KeygenArgs {
+    /// The recipient key file name.
+    /// Defaults to $USER.
+    #[arg(short, long)]
+    name: Option<String>,
+
+    /// Force re-generation of key-pair if it already exists.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+}
+
+#[derive(clap::Args, Debug, Default)]
+struct EditArgs {
+    /// The file to edit.
+    path: PathBuf,
+
+    /// Encrypt to recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Skip updating timestamps on encrypted and decrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_TIMESTAMPS")]
+    skip_timestamps: bool,
+
+    /// Skip adding encrypted and decrypted files to .gitignore.
+    #[arg(long, env = "GIT_SECRETS_SKIP_GITIGNORE")]
+    skip_gitignore: bool,
+
+    /// Force re-encryption/re-decryption even if the files are not modified.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Delete decrypted files after editing and encrypting.
+    #[arg(long, env = "GIT_SECRETS_CLEAN")]
+    clean: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct EncryptArgs {
+    /// The file or dir to encrypt, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Encrypt to recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Skip updating timestamps on encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_TIMESTAMPS")]
+    skip_timestamps: bool,
+
+    /// Skip adding encrypted files to .gitignore.
+    #[arg(long, env = "GIT_SECRETS_SKIP_GITIGNORE")]
+    skip_gitignore: bool,
+
+    /// Skip checksum matching and re-encrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Dry run, don't actually encrypt anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Delete decrypted files after encrypting.
+    #[arg(long, env = "GIT_SECRETS_CLEAN")]
+    clean: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct DecryptArgs {
+    /// The file or dir to decrypt, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip updating timestamps on decrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_TIMESTAMPS")]
+    skip_timestamps: bool,
+
+    /// Skip adding decrypted files to .gitignore.
+    #[arg(long, env = "GIT_SECRETS_SKIP_GITIGNORE")]
+    skip_gitignore: bool,
+
+    /// Skip checksum verification and re-decrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Dry run, don't actually decrypt anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct CatArgs {
+    /// The secret path to decrypt. Accepts plain, .cott.age, or .cott.toml path.
+    /// Fails if stdin is not empty. Use `aiusec tee` to encrypt stdin.
+    path: PathBuf,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip checksum verification and force output.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct TeeArgs {
+    /// The secret path to encrypt into. Accepts plain, .cott.age, or .cott.toml path.
+    /// Expects the content from stdin.
+    path: PathBuf,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip checksum verification and force output.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Dry run, don't actually decrypt or run the command.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct RotateArgs {
+    /// The secret file or dir to rotate, defaults to project root.
+    /// Recipients checksum is not verified, as it is expected to change.
+    path: Vec<PathBuf>,
+
+    /// Encrypt for recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip checksum verification of the encrypted file.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Dry run, don't actually write anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct RunArgs {
+    /// The command to run.
+    command: String,
+
+    /// Additional arguments to the command. If any argument is an encrypted file, it will be
+    /// decrypted and replaced with the decrypted path.
+    args: Vec<String>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip checksum verification and decrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Dry run, don't actually decrypt or run the command.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Delete decrypted files after running the command.
+    #[arg(long, env = "GIT_SECRETS_CLEAN")]
+    clean: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct EnvArgs {
+    /// The command to run.
+    command: String,
+
+    /// Additional arguments to the command.
+    args: Vec<String>,
+
+    /// Optional path to the encrypted file.
+    /// Dotenv incompatible secrets will be exported as "GIT_SECRETS_SECRET".
+    /// Defaults to .env.cott.age in the current directory.
+    #[arg(short = 'F', long)]
+    file: Option<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Skip checksum verification and decrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Dry run, decrypt secrets in memory, but don't actually run the command.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct SyncArgs {
+    /// The file or dir to sync, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Encrypt to recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Skip updating timestamps on encrypted and decrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_TIMESTAMPS")]
+    skip_timestamps: bool,
+
+    /// Skip adding encrypted and decrypted files to .gitignore.
+    #[arg(long, env = "GIT_SECRETS_SKIP_GITIGNORE")]
+    skip_gitignore: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Skip encryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_ENCRYPTION")]
+    skip_encryption: bool,
+
+    /// Skip decryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_DECRYPTION")]
+    skip_decryption: bool,
+
+    /// Skip checksum verification and re-encrypt/re-decrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Dry run, don't actually encrypt or decrypt anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct DiffArgs {
+    /// The file or dir to diff, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Skip pending encryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_ENCRYPTION")]
+    skip_encryption: bool,
+
+    /// Skip pending decryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_DECRYPTION")]
+    skip_decryption: bool,
+
+    /// Skip checksum verification.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Exit with code 1 if there is any diff.
+    #[arg(long, env = "GIT_SECRETS_FAIL")]
+    fail: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct StatusArgs {
+    /// The file or dir to check status of, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+
+    /// Skip pending encryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_ENCRYPTION")]
+    skip_encryption: bool,
+
+    /// Skip pending decryption.
+    #[arg(long, env = "GIT_SECRETS_SKIP_DECRYPTION")]
+    skip_decryption: bool,
+
+    /// Exit with code 1 if there are pending operations.
+    #[arg(long, env = "GIT_SECRETS_FAIL")]
+    fail: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct VerifyArgs {
+    /// The file or dir to verify, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct PullArgs {
+    /// The upstream name to pull from. Defaults to all upstreams.
+    upstream: Option<String>,
+
+    /// The file or dir to pull, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Encrypt to recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Encrypt to a PEM encoded format.
+    #[arg(short, long, env = "GIT_SECRETS_ARMOR")]
+    armor: bool,
+
+    /// Skip updating timestamps on encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_TIMESTAMPS")]
+    skip_timestamps: bool,
+
+    /// Skip adding encrypted files to .gitignore.
+    #[arg(long, env = "GIT_SECRETS_SKIP_GITIGNORE")]
+    skip_gitignore: bool,
+
+    /// Skip checksum matching and re-encrypt all files.
+    #[arg(long, short, env = "GIT_SECRETS_FORCE")]
+    force: bool,
+
+    /// Skip preview generation.
+    #[arg(long, env = "GIT_SECRETS_SKIP_PREVIEW")]
+    skip_preview: bool,
+
+    /// Dry run, don't actually pull anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Enable outputs from stderr, useful for debugging upstream scripts.
+    #[arg(long)]
+    debug: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct PushArgs {
+    /// The upstream name to push to. Defaults to all upstreams.
+    upstream: Option<String>,
+
+    /// The file or dir to push, defaults to project root.
+    path: Vec<PathBuf>,
+
+    /// Use the identity file at PATH, or the identity string itself. Can be repeated.
+    /// Defaults to ~/.config/git_secrets/identity/<dirname> or ~/.config/git_secrets/identity or ~/.ssh.
+    #[arg(short, long, env = "GIT_SECRETS_IDENTITY")]
+    identity: Vec<String>,
+
+    /// Verify against recipients listed at PATH. Can be repeated.
+    /// Defaults to recipients in .git_secrets/recipients.
+    #[arg(short = 'R', long, env = "GIT_SECRETS_RECIPIENTS_FILE")]
+    recipients_file: Vec<PathBuf>,
+
+    /// Skip checksum verification of encrypted files.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_ENCRYPTED")]
+    skip_verify_encrypted: bool,
+
+    /// Skip checksum verification of recipients.
+    #[arg(long, env = "GIT_SECRETS_SKIP_VERIFY_RECIPIENTS")]
+    skip_verify_recipients: bool,
+
+    /// Dry run, don't actually push anything.
+    #[arg(short = 'n', long)]
+    dry_run: bool,
+
+    /// Enable outputs from stderr, useful for debugging upstream scripts.
+    #[arg(long)]
+    debug: bool,
+
+    /// Compact output.
+    #[arg(long, env = "GIT_SECRETS_COMPACT")]
+    compact: bool,
+}
+
+fn get_input_paths(proj: &Project, path: Vec<PathBuf>) -> Vec<PathBuf> {
+    if path.is_empty() {
+        vec![proj.root().into()]
+    } else {
+        path
+    }
+}
+
+fn run_encrypt_cmd(proj: &Project, args: EncryptArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+    let identities = load_identities(proj, args.identity).collect();
+
+    let options = EncryptOptions {
+        recipients,
+        identities,
+        armor: args.armor,
+        skip_gitignore: args_skip_gitignore(proj, args.skip_gitignore),
+        skip_timestamps: args.skip_timestamps,
+        skip_preview: args.skip_preview,
+        force: args.force,
+        identity_path: proj.identity_path().to_path_buf(),
+        dry_run: args.dry_run,
+    };
+
+    for path in &input {
+        for res in encrypt_path(proj.prefix(), path, &options) {
+            let res = res?;
+            if !quiet {
+                print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+            }
+        }
+    }
+
+    if args.clean {
+        let clean_opts = CleanOptions {
+            dry_run: options.dry_run,
+            gitignore: false,
+            encrypted: false,
+        };
+
+        for res in input
+            .iter()
+            .flat_map(|p| clean_path(proj.prefix(), p, &clean_opts))
+        {
+            let res = res?;
+            if !quiet {
+                print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn run_decrypt_cmd(proj: &Project, args: DecryptArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+    let identities = load_identities(proj, args.identity).collect();
+
+    let options = DecryptOptions {
+        recipients,
+        identities,
+        skip_gitignore: args_skip_gitignore(proj, args.skip_gitignore),
+        skip_timestamps: args.skip_timestamps,
+        skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+        skip_verify_recipients: args.force || args.skip_verify_recipients,
+        dry_run: args.dry_run,
+    };
+
+    for path in &input {
+        for res in decrypt_path(proj.prefix(), path, &options) {
+            let res = res?;
+            if !quiet {
+                print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_stdin() -> Result<Option<SecretSlice<u8>>> {
+    if std::io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    let mut buffer = vec![];
+    std::io::stdin().lock().read_to_end(&mut buffer)?;
+    Ok(Some(SecretSlice::new(buffer.into())))
+}
+
+fn run_cat_cmd(proj: &Project, args: CatArgs) -> Result<()> {
+    let has_stdin = read_stdin()
+        .ok()
+        .flatten()
+        .map_or(false, |s| !s.expose_secret().is_empty());
+    if has_stdin {
+        anyhow::bail!("use 'aiusec tee' to pipe secrets for encryption");
+    }
+
+    let identities: Vec<_> = load_identities(proj, args.identity).collect();
+    let recipients: Vec<_> = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = CatOptions {
+        encrypt_options: EncryptOptions {
+            recipients,
+            identities,
+            armor: false,
+            skip_gitignore: true,
+            skip_timestamps: true,
+            skip_preview: true,
+            force: args.force,
+            identity_path: proj.identity_path().to_path_buf(),
+            dry_run: false,
+        },
+        skip_verify_encrypted: args.skip_verify_encrypted,
+        skip_verify_recipients: args.skip_verify_recipients,
+    };
+
+    cat(
+        proj.prefix(),
+        &args.path,
+        &options,
+        std::io::stdout().lock(),
+    )?;
+    Ok(())
+}
+
+fn run_tee_cmd(proj: &Project, args: TeeArgs) -> Result<()> {
+    let identities: Vec<_> = load_identities(proj, args.identity).collect();
+    let recipients: Vec<_> = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = EncryptOptions {
+        recipients,
+        identities,
+        armor: args.armor,
+        skip_gitignore: true,
+        skip_timestamps: true,
+        skip_preview: args.skip_preview,
+        force: args.force,
+        identity_path: proj.identity_path().to_path_buf(),
+        dry_run: args.dry_run,
+    };
+
+    if let Some(res) = tee(proj.prefix(), &args.path, read_stdin()?, &options)? {
+        print_result(&mut std::io::stdout().lock(), proj, &res, false)?;
+    }
+    Ok(())
+}
+
+fn run_rotate_cmd(proj: &Project, args: RotateArgs) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let identities: Vec<_> = load_identities(proj, args.identity).collect();
+    let recipients: Vec<_> = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = EncryptOptions {
+        recipients,
+        identities,
+        armor: args.armor,
+        skip_gitignore: true,
+        skip_timestamps: true,
+        skip_preview: args.skip_preview,
+        force: args.force,
+        identity_path: proj.identity_path().to_path_buf(),
+        dry_run: args.dry_run,
+    };
+
+    for path in &input {
+        for res in rotate_path(proj.prefix(), path, &options) {
+            print_result(&mut std::io::stdout().lock(), proj, &res?, false)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_status_cmd(proj: &Project, args: StatusArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+
+    let opts = StatusOptions {
+        skip_encryption: args.skip_encryption,
+        skip_decryption: args.skip_decryption,
+    };
+
+    let mut has_pending = false;
+    for path in &input {
+        for res in status_path(proj.prefix(), path, opts) {
+            let res = res?;
+            has_pending = true;
+            if !quiet {
+                print_result(
+                    &mut std::io::stdout().lock(),
+                    proj,
+                    &res.into(),
+                    args.compact,
+                )?;
+            }
+        }
+    }
+
+    if has_pending && args.fail {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn run_sync_cmd(proj: &Project, args: SyncArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let identities = load_identities(proj, args.identity).collect();
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+
+    let sync_options = SyncOptions {
+        identities,
+        recipients,
+        armor: args.armor,
+        skip_gitignore: args_skip_gitignore(proj, args.skip_gitignore),
+        skip_timestamps: args.skip_timestamps,
+        skip_preview: args.skip_preview,
+        skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+        skip_verify_recipients: args.force || args.skip_verify_recipients,
+        skip_encryption: args.skip_encryption,
+        skip_decryption: args.skip_decryption,
+        force: args.force,
+        identity_path: proj.identity_path().to_path_buf(),
+        dry_run: args.dry_run,
+    };
+
+    for path in &input {
+        for res in sync_path(proj.prefix(), path, &sync_options) {
+            let res = res?;
+            if !quiet {
+                print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn run_diff_cmd(proj: &Project, args: DiffArgs) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let identities = load_identities(proj, args.identity).collect();
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = DiffOptions {
+        identities,
+        recipients,
+        skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+        skip_verify_recipients: args.force || args.skip_verify_recipients,
+        skip_encryption: args.skip_encryption,
+        skip_decryption: args.skip_decryption,
+    };
+
+    if diff(proj, &input, options)? && args.fail {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn run_clean_cmd(proj: &Project, args: CleanArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+
+    let opts = CleanOptions {
+        dry_run: args.dry_run,
+        gitignore: (args.all || args.gitignore) && proj.git().is_some(),
+        encrypted: args.all || args.encrypted,
+    };
+
+    for res in input
+        .iter()
+        .flat_map(|p| clean_path(proj.prefix(), p, &opts))
+    {
+        let res = res?;
+        if !quiet {
+            print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+        }
+    }
+
+    if args.all {
+        proj.clean(args.dry_run)?;
+    }
+    Ok(())
+}
+
+fn run_run_cmd(proj: &Project, args: RunArgs, quiet: bool) -> Result<()> {
+    let identities = load_identities(proj, args.identity).collect();
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = RunOptions {
+        command: args.command,
+        args: args.args,
+        decrypt_options: DecryptOptions {
+            identities,
+            recipients,
+            skip_gitignore: true,
+            skip_timestamps: true,
+            skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+            skip_verify_recipients: args.force || args.skip_verify_recipients,
+            dry_run: args.dry_run,
+        },
+        dry_run: args.dry_run,
+        clean: args.clean,
+    };
+
+    let res = run_task(
+        proj.prefix(),
+        proj.root(),
+        |p| proj.relative_to_cwd(p),
+        options,
+    )?;
+    let mut stderr = std::io::stderr();
+    for op_res in res.operation_results {
+        let op_res = op_res?;
+        if !quiet {
+            print_result(&mut stderr, proj, &op_res, args.compact)?;
+        }
+    }
+
+    if res.exit_code != 0 {
+        std::process::exit(res.exit_code);
+    }
+
+    Ok(())
+}
+
+fn run_env_cmd(proj: &Project, args: EnvArgs) -> Result<()> {
+    let identities = load_identities(proj, args.identity).collect();
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = EnvOptions {
+        command: args.command,
+        args: args.args,
+        file: args.file,
+        decrypt_options: DecryptOptions {
+            identities,
+            recipients,
+            skip_gitignore: true,
+            skip_timestamps: true,
+            skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+            skip_verify_recipients: args.force || args.skip_verify_recipients,
+            dry_run: args.dry_run,
+        },
+        dry_run: args.dry_run,
+    };
+
+    env_task(proj, options)
+}
+
+fn run_edit_cmd(proj: &Project, args: EditArgs, quiet: bool) -> Result<()> {
+    let recipients: Vec<_> = load_recipients(proj, args.recipients_file, None).collect();
+    let identities: Vec<_> = load_identities(proj, args.identity).collect();
+
+    let options = EditOptions {
+        path: args.path,
+        decrypt_options: DecryptOptions {
+            identities: identities.clone(),
+            recipients: recipients.clone(),
+            skip_gitignore: args_skip_gitignore(proj, args.skip_gitignore),
+            skip_timestamps: args.skip_timestamps,
+            skip_verify_encrypted: args.force || args.skip_verify_encrypted,
+            skip_verify_recipients: args.force || args.skip_verify_recipients,
+            dry_run: false,
+        },
+        encrypt_options: EncryptOptions {
+            recipients,
+            identities,
+            identity_path: proj.identity_path().to_path_buf(),
+            armor: args.armor,
+            skip_gitignore: args_skip_gitignore(proj, args.skip_gitignore),
+            skip_timestamps: args.skip_timestamps,
+            skip_preview: args.skip_preview,
+            force: args.force,
+            dry_run: false,
+        },
+        clean: args.clean,
+    };
+
+    let res = edit_task(proj.prefix(), options)?;
+    for op_res in res {
+        let op_res = op_res?;
+        if !quiet {
+            print_result(&mut std::io::stdout().lock(), proj, &op_res, args.compact)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_pull_cmd(proj: &Project, args: PullArgs, _quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+    let identities = load_identities(proj, args.identity).collect();
+
+    let options = PullOptions {
+        upstream: args.upstream,
+        recipients,
+        identities,
+        armor: args.armor,
+        skip_preview: args.skip_preview,
+        identity_path: proj.identity_path().to_path_buf(),
+        dry_run: args.dry_run,
+        debug: args.debug,
+    };
+
+    for path in &input {
+        for res in pull_path(path, proj, &options) {
+            let res = res?;
+            print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_push_cmd(proj: &Project, args: PushArgs, _quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+    let identities = load_identities(proj, args.identity).collect();
+
+    let options = PushOptions {
+        upstream: args.upstream,
+        recipients,
+        identities,
+        dry_run: args.dry_run,
+        debug: args.debug,
+    };
+
+    for path in &input {
+        for res in push_path(path, proj, &options) {
+            let res = res?;
+            print_result(&mut std::io::stdout().lock(), proj, &res, args.compact)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_complete_cmd(shell: clap_complete::Shell) -> Result<()> {
+    let mut aiusec = GitSecretsCli::command();
+    let aiusec_name = aiusec.get_name().to_owned();
+    let mut aiusecx = GitSecretsXCli::command();
+    let aiusecx_name = aiusecx.get_name().to_owned();
+    let mut out = std::io::stdout().lock();
+    clap_complete::generate(shell, &mut aiusec, aiusec_name, &mut out);
+    clap_complete::generate(shell, &mut aiusecx, aiusecx_name, &mut out);
+    Ok(())
+}
+
+fn setup_logging(verbosity: Verbosity<WarnLevel>) {
+    env_logger::Builder::new()
+        .filter_level(verbosity.into())
+        .format(|buf, record| {
+            let level = match record.level() {
+                log::Level::Error => record.level().to_string().to_lowercase().err().to_string(),
+                log::Level::Warn => record
+                    .level()
+                    .to_string()
+                    .to_lowercase()
+                    .text()
+                    .to_string(),
+                _ => record.level().to_string().to_lowercase(),
+            };
+            if record.level() <= log::Level::Warn {
+                writeln!(buf, "{}: {}", level, record.args())
+            } else {
+                writeln!(
+                    buf,
+                    "{} {}: {}",
+                    level,
+                    chrono::Local::now()
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                        .dim(),
+                    record.args()
+                )
+            }
+        })
+        .init();
+}
+
+fn run_verify_cmd(proj: &Project, args: VerifyArgs, quiet: bool) -> Result<()> {
+    let input = get_input_paths(proj, args.path);
+    let recipients = load_recipients(proj, args.recipients_file, None).collect();
+
+    let options = VerifyOptions {
+        recipients,
+        skip_verify_encrypted: args.skip_verify_encrypted,
+        skip_verify_recipients: args.skip_verify_recipients,
+    };
+
+    for path in &input {
+        for res in verify_path(proj.prefix(), path, &options) {
+            res?;
+        }
+    }
+
+    if !quiet {
+        println!(
+            "{}: all encrypted secrets are in sync with metadata",
+            "verified".text()
+        );
+    }
+
+    Ok(())
+}
+
+fn run_prefix_cmd(proj: &Project, command: PrefixCommand, quiet: bool) -> Result<()> {
+    let (moves, dry_run) = match command {
+        PrefixCommand::Sync(args) => {
+            let mut moves = vec![];
+            for path in get_input_paths(proj, args.path) {
+                moves.extend(prefix_sync(proj.prefix(), &path, args.dry_run)?);
+            }
+            (moves, args.dry_run)
+        }
+        PrefixCommand::Revert(args) => (prefix_revert(proj.prefix(), args.dry_run)?, args.dry_run),
+    };
+
+    if !quiet {
+        for (from, to) in &moves {
+            println!(
+                "{} {} -> {}",
+                if dry_run {
+                    "  would move"
+                } else {
+                    "        move"
+                }
+                .text(),
+                proj.relative_to_cwd(from).display(),
+                proj.relative_to_cwd(to).display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn run_keygen_cmd(proj: &Project, args: KeygenArgs) -> Result<()> {
+    proj.keygen(args.name, args.force)
+}
+
+fn run_cmd(cmd: Command, verbosity: Verbosity<WarnLevel>) -> Result<()> {
+    if let Command::AutoComplete { shell } = cmd {
+        return run_complete_cmd(shell);
+    };
+
+    setup_logging(verbosity);
+
+    let proj = if matches!(cmd, Command::Init) {
+        Project::init()?
+    } else {
+        Project::load()?
+    };
+
+    let is_silent = verbosity.is_silent();
+
+    match cmd {
+        Command::Init | Command::AutoComplete { shell: _ } => Ok(()), // already handled
+        Command::Keygen(args) => run_keygen_cmd(&proj, args),
+        Command::Encrypt(args) => run_encrypt_cmd(&proj, args, is_silent),
+        Command::Decrypt(args) => run_decrypt_cmd(&proj, args, is_silent),
+        Command::Cat(args) => run_cat_cmd(&proj, args),
+        Command::Tee(args) => run_tee_cmd(&proj, args),
+        Command::Rotate(args) => run_rotate_cmd(&proj, args),
+        Command::Sync(args) => run_sync_cmd(&proj, args, is_silent),
+        Command::Status(args) => run_status_cmd(&proj, args, is_silent),
+        Command::Diff(args) => run_diff_cmd(&proj, args),
+        Command::Verify(args) => run_verify_cmd(&proj, args, is_silent),
+        Command::Clean(args) => run_clean_cmd(&proj, args, is_silent),
+        Command::Edit(args) => run_edit_cmd(&proj, args, is_silent),
+        Command::Prefix { command } => run_prefix_cmd(&proj, command, is_silent),
+        Command::Run(args) => run_run_cmd(&proj, args, is_silent),
+        Command::Env(args) => run_env_cmd(&proj, args),
+        Command::Pull(args) => run_pull_cmd(&proj, args, is_silent),
+        Command::Push(args) => run_push_cmd(&proj, args, is_silent),
+    }
+}
+
+pub fn runx() -> Result<()> {
+    let cli = GitSecretsXCli::parse();
+    let cmd = Command::Run(cli.run);
+    run_cmd(cmd, cli.verbosity)
+}
+
+pub fn run() -> Result<()> {
+    let cli = GitSecretsCli::parse();
+    run_cmd(cli.command, cli.verbosity)
+}
+
+pub fn run_from(argv: Vec<std::ffi::OsString>) -> Result<()> {
+    let cli = GitSecretsCli::parse_from(argv);
+    run_cmd(cli.command, cli.verbosity)
+}
+
+fn args_skip_gitignore(proj: &Project, skip_gitignore: bool) -> bool {
+    skip_gitignore || proj.git().is_none()
+}

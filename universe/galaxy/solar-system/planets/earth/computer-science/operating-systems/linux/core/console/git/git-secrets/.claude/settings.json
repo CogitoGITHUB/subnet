@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(aiusec*)",
+      "Read(.git-secrets/**)",
+      "Read(**/.git-secrets/**)",
+      "Edit(.git-secrets/**)",
+      "Edit(**/.git-secrets/**)",
+      "Write(.git-secrets/**)",
+      "Write(**/.git-secrets/**)",
+      "Read(**/*.cott.*)",
+      "Edit(**/*.cott.*)",
+      "Write(**/*.cott.*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aiusec clean -qqq"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aiusec clean -qqq"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/deny-secrets.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

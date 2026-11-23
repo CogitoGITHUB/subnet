@@ -1,0 +1,35 @@
+//! Steam fetchers — Steam Web API readouts: player profile, recently-played games, owned
+//! game library, and the global most-played chart.
+//!
+//! Every authenticated request targets the fixed host `api.steampowered.com`. Config-provided
+//! fields (`steam_id`, `count`, …) only change which resource on that host is queried; the API
+//! key never leaves to an attacker-controlled origin. The `steam_charts` fetcher also calls the
+//! `store.steampowered.com/api/appdetails` store endpoint to resolve appid → game name (the
+//! chart endpoint itself returns appid-only), again with a fixed host. Both are classified as
+//! `Safety::Safe`, same model as the `github_*` and `lastfm_*` families.
+//!
+//! Auth: `STEAM_API_KEY` — create one at https://steamcommunity.com/dev/apikey and put it in
+//! `$HOME/.splash/secrets.toml`. `steam_charts` is the only family member that needs no
+//! key (the chart endpoint is public).
+
+mod charts;
+mod client;
+mod common;
+mod games;
+mod owned_games;
+mod player_summary;
+mod recently_played;
+
+use std::sync::Arc;
+
+use crate::fetcher::Fetcher;
+
+pub fn fetchers() -> Vec<Arc<dyn Fetcher>> {
+    vec![
+        Arc::new(player_summary::SteamPlayerSummary),
+        Arc::new(recently_played::SteamRecentlyPlayed),
+        Arc::new(owned_games::SteamOwnedGames),
+        Arc::new(charts::SteamCharts),
+    ]
+}
+

@@ -1,0 +1,28 @@
+[package]
+authors.workspace = true
+description = "A version incrementer plugin for Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/console_plugin_example"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console_plugin_example"
+version.workspace = true
+publish = false
+
+[[bin]]
+name = "console_plugin_example"
+bench = false
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-plugin.workspace = true
+console-protocol = { workspace = true, features = ["plugin"] }
+
+[dev-dependencies]
+console-plugin-test-support.workspace = true
+console-cmd-lang.workspace = true

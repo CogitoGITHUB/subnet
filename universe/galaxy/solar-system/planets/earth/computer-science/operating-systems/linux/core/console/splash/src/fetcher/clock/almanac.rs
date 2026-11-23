@@ -1,0 +1,137 @@
+//! `clock_almanac` — daily astro / calendric rollup as `Entries`. Packs the values
+//! that `clock_derived` exposes one-at-a-time (moon phase / season / zodiac / chinese
+//! zodiac / iso week / day of year) into a single multi-row widget so they can share
+//! a cell with `grid_calendar` in a 2-column layout.
+//!
+//! Every value comes from the same date-arithmetic functions `clock_derived` uses —
+//! this fetcher is a thin shape adapter, not a new source of data.
+
+use chrono::{DateTime, Datelike, FixedOffset};
+use serde::Deserialize;
+
+use crate::fetcher::{FetchContext, RealtimeFetcher, Safety};
+use crate::payload::{Body, CalendarData, EntriesData, Entry, Payload};
+use crate::render::Shape;
+use crate::samples;
+
+use super::common;
+use super::derived::{self, Hemisphere, Kind};
+
+const SHAPES: &[Shape] = &[Shape::Entries, Shape::TextBlock, Shape::Calendar];
+
+pub struct ClockAlmanacFetcher;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Options {
+    #[serde(default)]
+    pub timezone: Option<String>,
+    /// Matches `clock_derived`'s option so the season row reads "Autumn" below the
+    /// equator in April. Defaults to Northern Hemisphere for back-compat.
+    #[serde(default)]
+    pub hemisphere: Option<Hemisphere>,
+}
+
+impl RealtimeFetcher for ClockAlmanacFetcher {
+    fn name(&self) -> &str {
+        "clock_almanac"
+    }
+    fn safety(&self) -> Safety {
+        Safety::Safe
+    }
+    fn description(&self) -> &'static str {
+        "A multi-row rollup of date-derived facts (moon phase, season, zodiac, chinese zodiac, ISO week, day of year). Use this when you want every almanac value at once; pick `clock_derived` instead to surface a single value on its own line. `Calendar` highlights today within the current month so the same fetcher can drive a `grid_calendar` widget."
+    }
+    fn shapes(&self) -> &[Shape] {
+        SHAPES
+    }
+    fn sample_body(&self, shape: Shape) -> Option<Body> {
+        Some(match shape {
+            Shape::Entries => samples::entries(&[
+                ("moon", "🌖 Waning Gibbous"),
+                ("season", "Spring"),
+                ("zodiac", "♉ Taurus"),
+                ("chinese", "🐎 Horse"),
+                ("iso week", "2026-W17"),
+                ("day of year", "114 of 365"),
+            ]),
+            Shape::TextBlock => samples::text_block(&[
+                "moon:        🌖 Waning Gibbous",
+                "season:      Spring",
+                "zodiac:      ♉ Taurus",
+                "chinese:     🐎 Horse",
+                "iso week:    2026-W17",
+                "day of year: 114 of 365",
+            ]),
+            Shape::Calendar => Body::Calendar(CalendarData {
+                year: 2026,
+                month: 4,
+                day: Some(24),
+                events: Vec::new(),
+            }),
+            _ => return None,
+        })
+    }
+    fn compute(&self, ctx: &FetchContext) -> Payload {
+        let opts: Options = match common::parse_options(ctx.options.as_ref()) {
+            Ok(o) => o,
+            Err(msg) => return common::placeholder(&msg),
+        };
+        let now = common::now_in(opts.timezone.as_deref());
+        let rows = rollup(&now, opts.hemisphere.unwrap_or_default());
+        let body = match ctx.shape.unwrap_or(Shape::Entries) {
+            Shape::TextBlock => Body::TextBlock(crate::payload::TextBlockData {
+                lines: rows.iter().map(|(k, v)| format!("{k}: {v}")).collect(),
+            }),
+            Shape::Calendar => Body::Calendar(CalendarData {
+                year: now.year(),
+                month: now.month() as u8,
+                day: Some(now.day() as u8),
+                events: Vec::new(),
+            }),
+            _ => Body::Entries(EntriesData {
+                items: rows
+                    .into_iter()
+                    .map(|(k, v)| Entry {
+                        key: k.into(),
+                        value: Some(v),
+                        status: None,
+                    })
+                    .collect(),
+            }),
+        };
+        Payload {
+            icon: None,
+            status: None,
+            format: None,
+            body,
+        }
+    }
+}
+
+fn rollup(now: &DateTime<FixedOffset>, hemisphere: Hemisphere) -> Vec<(&'static str, String)> {
+    vec![
+        ("moon", derived::invoke(now, Kind::MoonPhase, hemisphere)),
+        ("season", derived::invoke(now, Kind::Season, hemisphere)),
+        ("zodiac", derived::invoke(now, Kind::Zodiac, hemisphere)),
+        (
+            "chinese",
+            derived::invoke(now, Kind::ChineseZodiac, hemisphere),
+        ),
+        ("iso week", derived::invoke(now, Kind::IsoWeek, hemisphere)),
+        (
+            "day of year",
+            format!("{} of {}", now.ordinal(), days_in_year(now)),
+        ),
+    ]
+}
+
+fn days_in_year(now: &DateTime<FixedOffset>) -> u32 {
+    let year = now.year();
+    if is_leap(year) { 366 } else { 365 }
+}
+
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+

@@ -1,0 +1,70 @@
+use super::{Context, Module, ModuleConfig};
+use crate::formatter::VersionFormatter;
+
+use crate::configs::cmake::CMakeConfig;
+use crate::formatter::StringFormatter;
+
+/// Creates a module with the current `CMake` version
+pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
+    let mut module = context.new_module("cmake");
+    let config = CMakeConfig::try_load(module.config);
+
+    let is_cmake_project = context
+        .try_begin_scan()?
+        .set_files(&config.detect_files)
+        .set_extensions(&config.detect_extensions)
+        .set_folders(&config.detect_folders)
+        .is_match();
+
+    if !is_cmake_project {
+        return None;
+    }
+
+    let parsed = StringFormatter::new(config.format).and_then(|formatter| {
+        formatter
+            .map_meta(|variable, _| match variable {
+                "symbol" => Some(config.symbol),
+                _ => None,
+            })
+            .map_style(|variable| match variable {
+                "style" => Some(Ok(config.style)),
+                _ => None,
+            })
+            .map(|variable| match variable {
+                "version" => {
+                    let cmake_version =
+                        parse_cmake_version(&context.exec_cmd("cmake", &["--version"])?.stdout)?;
+                    VersionFormatter::format_module_version(
+                        module.get_name(),
+                        &cmake_version,
+                        config.version_format,
+                    )
+                    .map(Ok)
+                }
+                _ => None,
+            })
+            .parse(None, Some(context))
+    });
+
+    module.set_segments(match parsed {
+        Ok(segments) => segments,
+        Err(error) => {
+            log::warn!("Error in module `cmake`: \n{error}");
+            return None;
+        }
+    });
+
+    Some(module)
+}
+
+fn parse_cmake_version(cmake_version: &str) -> Option<String> {
+    Some(
+        cmake_version
+            //split into ["cmake" "version" "3.10.2", ...]
+            .split_whitespace()
+            // get down to "3.10.2"
+            .nth(2)?
+            .to_string(),
+    )
+}
+

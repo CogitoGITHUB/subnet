@@ -1,6 +1,0 @@
-test mod-properties
-level 2
-module ../../FILE/runfile/model/properties.rkt
-call (list? property-keywords)
-expect result equals #t
-expect seconds-under 20

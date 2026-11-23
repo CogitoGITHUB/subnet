@@ -1,0 +1,472 @@
+//! The main list screen: search box, host list with match highlighting, hint bar.
+
+use std::collections::HashMap;
+
+use nucleo_matcher::Matcher;
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+
+use crate::app::App;
+use crate::model::{Host, Site};
+use crate::search;
+
+pub fn render(frame: &mut Frame, app: &App) {
+    let chunks = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .split(frame.area());
+
+    render_search(frame, app, chunks[0]);
+    render_list(frame, app, chunks[1]);
+    render_hint(frame, app, chunks[2]);
+}
+
+fn render_search(frame: &mut Frame, app: &App, area: Rect) {
+    // The title says `pick` in pick mode, so a list that won't connect doesn't look like one
+    // that will.
+    let title = format!(
+        " ssh-manager{}  {}/{} ",
+        if app.pick { " pick" } else { "" },
+        app.order.len(),
+        app.hosts.len()
+    );
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let inner = block.inner(area);
+    let text = Line::from(vec![
+        Span::styled("> ", Style::default().fg(super::accent())),
+        Span::raw(app.query.as_str()),
+    ]);
+    frame.render_widget(Paragraph::new(text).block(block), area);
+
+    // Place the cursor right after the typed query.
+    let cx = inner.x + 2 + app.query.chars().count() as u16;
+    let cx = cx.min(inner.x + inner.width.saturating_sub(1));
+    frame.set_cursor_position((cx, inner.y));
+}
+
+fn render_list(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default().borders(Borders::ALL);
+
+    if app.order.is_empty() {
+        let msg = if app.hosts.is_empty() {
+            "No hosts yet — press ^a to add one, or import with ^o."
+        } else {
+            "No matches."
+        };
+        frame.render_widget(
+            Paragraph::new(msg)
+                .style(Style::default().fg(crate::run_style::dim()))
+                .block(block),
+            area,
+        );
+        return;
+    }
+
+    let name_w = app
+        .order
+        .iter()
+        .map(|&i| app.hosts[i].name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .clamp(6, 24);
+
+    let mut matcher = search::matcher();
+    // Highlight only the fuzzy part of the query (not any `tag:`/`site:` tokens).
+    let (_, _, fuzzy) = search::parse_query(&app.query);
+    let ctx = RowCtx {
+        sites: &app.sites,
+        name_w,
+        fuzzy: &fuzzy,
+        base: Style::default(),
+        hl: Style::default()
+            .fg(super::accent())
+            .add_modifier(Modifier::BOLD),
+        app,
+    };
+
+    // Idle → group hosts under site headers; filtering → a flat list with a site column.
+    // `app.selected` indexes `order` (hosts only); headers shift the ListState index, so we
+    // track the selected host's position among the rendered items.
+    let grouped = app.query.is_empty();
+    let mut items: Vec<ListItem> = Vec::new();
+    let mut selected_listidx = 0usize;
+
+    if grouped {
+        let header_style = Style::default().fg(crate::run_style::dim());
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for &i in &app.order {
+            *counts.entry(section_key(&app.hosts[i])).or_default() += 1;
+        }
+        let mut prev: Option<String> = None;
+        for (pos, &i) in app.order.iter().enumerate() {
+            let h = &app.hosts[i];
+            let key = section_key(h);
+            if prev.as_deref() != Some(key.as_str()) {
+                let n = counts.get(&key).copied().unwrap_or(0);
+                items.push(ListItem::new(Line::from(Span::styled(
+                    format!("── {} ({}) ──", section_display(h), n),
+                    header_style,
+                ))));
+                prev = Some(key);
+            }
+            if pos == app.selected {
+                selected_listidx = items.len();
+            }
+            items.push(host_row(h, &ctx, &mut matcher, false));
+        }
+    } else {
+        for (pos, &i) in app.order.iter().enumerate() {
+            if pos == app.selected {
+                selected_listidx = items.len();
+            }
+            items.push(host_row(&app.hosts[i], &ctx, &mut matcher, true));
+        }
+    }
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▸ ")
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = ListState::default();
+    state.select(Some(selected_listidx));
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// The section a host belongs to, for display (its site name, or `(no site)`).
+fn section_display(h: &Host) -> &str {
+    h.site.as_deref().unwrap_or("(no site)")
+}
+
+/// The case-insensitive section key (matches `app::group_order`'s grouping).
+fn section_key(h: &Host) -> String {
+    section_display(h).to_lowercase()
+}
+
+/// What every row needs and no row changes: the defined sites (to resolve inherited defaults),
+/// the name column width, the fuzzy part of the query, and the two highlight styles.
+struct RowCtx<'a> {
+    sites: &'a [Site],
+    name_w: usize,
+    fuzzy: &'a str,
+    base: Style,
+    hl: Style,
+    /// The app, for the per-row marks. Borrowed rather than copied so a large selection costs
+    /// nothing per frame.
+    app: &'a App,
+}
+
+/// One host row: `name  user@host:port  [tags]`, fuzzy-highlighted, with an optional dim
+/// `·site·` column (shown only in the flat/filtered view, where there are no section headers).
+/// The endpoint resolves the host's site defaults, so an inherited user is the one shown.
+fn host_row(h: &Host, ctx: &RowCtx, matcher: &mut Matcher, show_site: bool) -> ListItem<'static> {
+    let mut text = format!(
+        "{:<width$}  {}",
+        h.name,
+        h.endpoint_in(ctx.sites),
+        width = ctx.name_w
+    );
+    if !h.tags.is_empty() {
+        text.push_str(&format!("  [{}]", h.tags.join(",")));
+    }
+    let indices = search::match_indices(&text, ctx.fuzzy, matcher);
+    let mut spans = super::highlight(&text, &indices, ctx.base, ctx.hl);
+    // A marked row leads with a filled box. Ahead of the text so the column lines up whether
+    // or not anything is marked, and so it survives the fuzzy highlighting untouched.
+    spans.insert(
+        0,
+        if ctx.app.is_marked(&h.id) {
+            Span::styled("◼ ", Style::default().fg(super::accent()))
+        } else {
+            Span::raw("  ")
+        },
+    );
+    if show_site && let Some(site) = &h.site {
+        spans.push(Span::styled(
+            format!("  ·{site}·"),
+            Style::default().fg(crate::run_style::dim()),
+        ));
+    }
+    // A shared credential is why several hosts answer with the same password, so it is worth
+    // seeing in the list rather than only in the editor.
+    if let Some(cred) = &h.credential {
+        spans.push(Span::styled(
+            format!("  @{cred}"),
+            Style::default().fg(crate::run_style::dim()),
+        ));
+    }
+    ListItem::new(Line::from(spans))
+}
+
+fn render_hint(frame: &mut Frame, app: &App, area: Rect) {
+    if let Some(status) = &app.status {
+        frame.render_widget(
+            Paragraph::new(status.as_str()).style(Style::default().fg(super::accent())),
+            area,
+        );
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(hint_for(area.width, app.pick)).style(Style::default().fg(crate::run_style::dim())),
+        area,
+    );
+}
+
+/// The widest hint that fits in `width`.
+///
+/// The full line is 142 columns, so on anything narrower it used to be cut mid-word and the
+/// last keys (including `esc quit`) simply vanished. Dropping whole entries instead keeps the
+/// line readable, and `F1` lists every key regardless.
+///
+/// Pick mode gets its own short line: `Enter` prints a name instead of connecting, and that is
+/// the one thing a user coming from `$(ssh-manager pick)` needs to be told.
+fn hint_for(width: u16, pick: bool) -> &'static str {
+    if pick {
+        const PICK: &str = "↵ print the name  ^s mark (prints every marked host)  esc cancel";
+        const PICK_SHORT: &str = "↵ print  ^s mark  esc cancel";
+        let width = width as usize;
+        return if PICK.chars().count() <= width {
+            PICK
+        } else {
+            PICK_SHORT
+        };
+    }
+    const FULL: &str = "↵ connect  ^a add  ^e edit  ^d del  ^s mark  ^k creds  ^y yank  ^t transfer  ^f forward  F1 help  F2 settings  F3 sites  F4 forwards  esc quit";
+    const MEDIUM: &str = "↵ connect  ^a add  ^e edit  ^d del  ^s mark  ^k creds  ^y yank  ^t transfer  ^f forward  F1 help  esc quit";
+    const SHORT: &str = "↵ connect  ^a add  ^s mark  ^k creds  F1 help  esc quit";
+    let width = width as usize;
+    for hint in [FULL, MEDIUM, SHORT] {
+        if hint.chars().count() <= width {
+            return hint;
+        }
+    }
+    "F1 help"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::config::Config;
+    use crate::model::{Host, Site};
+    use crate::paths::Paths;
+    use crate::state::FrecencyState;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn the_hint_bar_drops_whole_entries_rather_than_being_cut() {
+        // Every variant fits the width it is chosen for, and none is cut mid-entry.
+        for width in [40u16, 60, 80, 100, 110, 120, 142, 200] {
+            let hint = hint_for(width, false);
+            assert!(
+                hint.chars().count() <= width as usize || hint == "F1 help",
+                "{width} got {hint:?}"
+            );
+            assert!(hint.ends_with("quit") || hint == "F1 help", "{hint:?}");
+        }
+        // The two new keys survive every variant that has room for more than the fallback.
+        for width in [60u16, 120, 200] {
+            assert!(hint_for(width, false).contains("^s mark"), "{width}");
+            assert!(hint_for(width, false).contains("^k creds"), "{width}");
+        }
+        assert!(hint_for(200, false).contains("F4 forwards"));
+        assert!(
+            !hint_for(120, false).contains("F4 forwards"),
+            "120 cols is too narrow for all of it"
+        );
+    }
+
+    #[test]
+    fn pick_mode_says_print_rather_than_connect() {
+        // The whole point of the mode is that Enter does not connect, so no width may claim it
+        // does, and every variant has to fit.
+        for width in [20u16, 40, 60, 80, 200] {
+            let hint = hint_for(width, true);
+            assert!(hint.contains("print"), "{width} got {hint:?}");
+            assert!(!hint.contains("connect"), "{width} got {hint:?}");
+            assert!(
+                hint.chars().count() <= width as usize || width < 30,
+                "{width} got {hint:?}"
+            );
+        }
+    }
+
+    fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+        buf.content().iter().map(|c| c.symbol()).collect()
+    }
+
+    fn app_with(query: &str) -> App {
+        let hosts = vec![
+            Host::new("prod-web", "10.0.0.1"),
+            Host::new("prod-db", "10.0.0.2"),
+            Host::new("bastion", "h.example.com"),
+        ];
+        let paths = Paths {
+            config_dir: std::env::temp_dir(),
+            data_dir: std::env::temp_dir(),
+            config_file_override: None,
+        };
+        let mut app = App::new(
+            hosts,
+            Vec::new(),
+            FrecencyState::default(),
+            Config::default(),
+            paths,
+        );
+        app.query.push_str(query);
+        app.recompute();
+        app
+    }
+
+    fn draw(app: &App) -> String {
+        let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
+        term.draw(|f| render(f, app)).unwrap();
+        buffer_text(term.backend().buffer())
+    }
+
+    #[test]
+    fn renders_all_hosts_when_idle() {
+        let text = draw(&app_with(""));
+        assert!(text.contains("prod-web"));
+        assert!(text.contains("bastion"));
+        assert!(text.contains("3/3")); // hint count
+    }
+
+    #[test]
+    fn filtering_hides_nonmatches() {
+        let text = draw(&app_with("prod"));
+        assert!(text.contains("prod-web"));
+        assert!(text.contains("prod-db"));
+        assert!(!text.contains("bastion"));
+    }
+
+    #[test]
+    fn idle_groups_under_site_headers() {
+        let mut app = app_with("");
+        app.hosts[0].site = Some("prod-dc".into());
+        app.hosts[1].site = Some("prod-dc".into());
+        app.recompute(); // bastion (idx 2) stays site-less
+        let text = draw(&app);
+        assert!(
+            text.contains("prod-dc"),
+            "expected a prod-dc section header"
+        );
+        assert!(text.contains("(no site)"), "expected a (no site) group");
+    }
+
+    /// Issue #16: a host with no user of its own, in a site that defines one, must list as the
+    /// **site's** user — not the local `$USER` the raw record falls back to.
+    #[test]
+    fn a_host_shows_the_user_it_inherits_from_its_site() {
+        let mut inherits = Host::new("web1", "10.0.0.1");
+        inherits.site = Some("dc".into());
+        let sites = vec![Site {
+            name: "dc".into(),
+            user: Some("deploy".into()),
+            port: None,
+            jump_hosts: Vec::new(),
+            identity_files: Vec::new(),
+        }];
+        let paths = Paths {
+            config_dir: std::env::temp_dir(),
+            data_dir: std::env::temp_dir(),
+            config_file_override: None,
+        };
+        let app = App::new(
+            vec![inherits],
+            sites,
+            FrecencyState::default(),
+            Config::default(),
+            paths,
+        );
+
+        let text = draw(&app);
+        assert!(text.contains("deploy@10.0.0.1:22"), "{text}");
+        // …and never the machine's own user (computed here so the test travels).
+        if let Ok(user) = std::env::var("USER")
+            && user != "deploy"
+        {
+            assert!(!text.contains(&format!("{user}@")), "{text}");
+        }
+    }
+
+    #[test]
+    fn filtering_shows_the_site_column() {
+        let mut app = app_with("");
+        app.hosts[0].site = Some("prod-dc".into());
+        app.query.push_str("prod-web");
+        app.recompute();
+        let text = draw(&app);
+        assert!(
+            text.contains("·prod-dc·"),
+            "expected a ·site· column when filtering"
+        );
+    }
+
+    fn buffer_lines(buf: &ratatui::buffer::Buffer) -> Vec<String> {
+        let w = buf.area.width as usize;
+        buf.content()
+            .chunks(w)
+            .map(|row| row.iter().map(|c| c.symbol()).collect())
+            .collect()
+    }
+
+    /// Renders a representative screen and writes an ASCII snapshot to
+    /// `target/tui-snapshot.txt` for eyeballing the layout (no TTY needed).
+    #[test]
+    fn writes_snapshot_artifact() {
+        let mut prod_web = Host::new("prod-web", "10.25.25.10");
+        prod_web.user = Some("deploy".into());
+        prod_web.tags = vec!["prod".into(), "web".into()];
+        let mut prod_db = Host::new("prod-db", "10.25.25.25");
+        prod_db.user = Some("mike".into());
+        prod_db.port = Some(5432);
+        prod_db.tags = vec!["prod".into(), "db".into()];
+        let mut bastion = Host::new("bastion", "bastion.example.com");
+        bastion.user = Some("ops".into());
+        bastion.tags = vec!["infra".into()];
+
+        let paths = Paths {
+            config_dir: std::env::temp_dir(),
+            data_dir: std::env::temp_dir(),
+            config_file_override: None,
+        };
+        let app = App::new(
+            vec![prod_web, prod_db, bastion],
+            Vec::new(),
+            FrecencyState::default(),
+            Config::default(),
+            paths,
+        );
+
+        let mut term = Terminal::new(TestBackend::new(72, 10)).unwrap();
+        term.draw(|f| render(f, &app)).unwrap();
+        let lines = buffer_lines(term.backend().buffer());
+        let snapshot: String = lines.join("\n");
+
+        assert!(snapshot.contains("prod-web"));
+        assert!(snapshot.contains("connect"));
+
+        if let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let path = std::path::Path::new(&dir).join("target/tui-snapshot.txt");
+            let _ = std::fs::write(path, &snapshot);
+        }
+    }
+
+    #[test]
+    fn highlight_groups_matched_runs() {
+        let base = Style::default();
+        let hl = Style::default().fg(crate::run_style::dim());
+        let spans = crate::ui::highlight("prod-web", &[0, 1, 2, 3], base, hl);
+        assert_eq!(spans[0].content, "prod");
+        assert_eq!(spans[0].style.fg, Some(crate::run_style::dim()));
+        assert_eq!(spans[1].content, "-web");
+        assert_eq!(spans[1].style.fg, None);
+    }
+}

@@ -1,0 +1,4 @@
+# Baked-in settings fallback. Loaded when
+# `$HOME/.splash/settings.toml` is absent.
+# Intentionally empty. Colors come from the style engine.
+# Users drop their own `[general]` in to override.

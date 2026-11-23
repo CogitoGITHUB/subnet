@@ -1,0 +1,24 @@
+[package]
+authors.workspace = true
+description = "The standard library of Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-std"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console-std"
+version.workspace = true
+
+[dependencies]
+console-parser.workspace = true
+console-protocol.workspace = true
+console-engine.workspace = true
+miette = { workspace = true, features = ["fancy-no-backtrace"] }
+
+log = "0.4"
+
+[lints]
+workspace = true
+
+[features]
+sqlite = []
+

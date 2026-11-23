@@ -1,0 +1,27 @@
+[package]
+authors.workspace = true
+description = "Color configuration code used by Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-color-config"
+edition.workspace = true
+license.workspace = true
+name = "console-color-config"
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+bench = false
+harness = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-protocol.workspace = true
+console-engine.workspace = true
+console-json.workspace = true
+nu-ansi-term.workspace = true
+
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+console-test-support = { path = "../console-test-support", features = ["os"] }

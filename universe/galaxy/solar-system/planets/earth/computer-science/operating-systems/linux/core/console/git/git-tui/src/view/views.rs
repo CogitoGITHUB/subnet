@@ -1,0 +1,934 @@
+use std::rc::Rc;
+
+use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
+
+use crate::{
+    app::AppContext,
+    event::{Sender, UserEventWithCount},
+    git::{Commit, CommitHash, FileChange, Ref},
+    shell::session::SessionView,
+    view::{
+        actions::ActionsView, blame::BlameView, branch_detail::BranchDetailView,
+        compare::CompareView, config::ConfigView, conflict::ConflictView, detail::DetailView,
+        dialog::DialogView, diff::DiffView, file_history::FileHistoryView, help::HelpView,
+        issue::IssuesView, list::ListView, pr::PullRequestsView, rebase::InteractiveRebaseView,
+        refs::RefsView, tag_detail::TagDetailView, terminal::TerminalView,
+        uncommitted::UncommittedView, user_command::UserCommandView,
+    },
+    widget::commit_list::CommitListState,
+};
+
+#[derive(Debug, Default)]
+pub enum View<'a> {
+    #[default]
+    Default, // dummy variant to make #[default] work
+    List(Box<ListView<'a>>),
+    Detail(Box<DetailView<'a>>),
+    Diff(Box<DiffView<'a>>),
+    UserCommand(Box<UserCommandView<'a>>),
+    Refs(Box<RefsView<'a>>),
+    Help(Box<HelpView<'a>>),
+    Config(Box<ConfigView<'a>>),
+    Dialog(Box<DialogView<'a>>),
+    BranchDetail(Box<BranchDetailView<'a>>),
+    TagDetail(Box<TagDetailView<'a>>),
+    Uncommitted(Box<UncommittedView<'a>>),
+    FileHistory(Box<FileHistoryView<'a>>),
+    Blame(Box<BlameView<'a>>),
+    Compare(Box<CompareView<'a>>),
+    Conflict(Box<ConflictView<'a>>),
+    InteractiveRebase(Box<InteractiveRebaseView<'a>>),
+    PullRequests(Box<PullRequestsView<'a>>),
+    Issues(Box<IssuesView<'a>>),
+    Terminal(Box<TerminalView<'a>>),
+    Actions(Box<ActionsView<'a>>),
+}
+
+impl<'a> View<'a> {
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key_event: KeyEvent) {
+        match self {
+            View::Default => {}
+            View::List(view) => view.handle_event(event_with_count, key_event),
+            View::Detail(view) => view.handle_event(event_with_count, key_event),
+            View::Diff(view) => view.handle_event(event_with_count, key_event),
+            View::UserCommand(view) => view.handle_event(event_with_count, key_event),
+            View::Refs(view) => view.handle_event(event_with_count, key_event),
+            View::Help(view) => view.handle_event(event_with_count, key_event),
+            View::Config(view) => view.handle_event(event_with_count, key_event),
+            View::Dialog(view) => view.handle_event(event_with_count, key_event),
+            View::BranchDetail(view) => view.handle_event(event_with_count, key_event),
+            View::TagDetail(view) => view.handle_event(event_with_count, key_event),
+            View::Uncommitted(view) => view.handle_event(event_with_count, key_event),
+            View::FileHistory(view) => view.handle_event(event_with_count, key_event),
+            View::Blame(view) => view.handle_event(event_with_count, key_event),
+            View::Compare(view) => view.handle_event(event_with_count, key_event),
+            View::Conflict(view) => view.handle_event(event_with_count, key_event),
+            View::InteractiveRebase(view) => view.handle_event(event_with_count, key_event),
+            View::PullRequests(view) => view.handle_event(event_with_count, key_event),
+            View::Issues(view) => view.handle_event(event_with_count, key_event),
+            View::Terminal(view) => view.handle_event(event_with_count, key_event),
+            View::Actions(view) => view.handle_event(event_with_count, key_event),
+        }
+    }
+
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        match self {
+            View::Default => {}
+            View::List(view) => view.render(f, area),
+            View::Detail(view) => view.render(f, area),
+            View::Diff(view) => view.render(f, area),
+            View::UserCommand(view) => view.render(f, area),
+            View::Refs(view) => view.render(f, area),
+            View::Help(view) => view.render(f, area),
+            View::Config(view) => view.render(f, area),
+            View::Dialog(view) => view.render(f, area),
+            View::BranchDetail(view) => view.render(f, area),
+            View::TagDetail(view) => view.render(f, area),
+            View::Uncommitted(view) => view.render(f, area),
+            View::FileHistory(view) => view.render(f, area),
+            View::Blame(view) => view.render(f, area),
+            View::Compare(view) => view.render(f, area),
+            View::Conflict(view) => view.render(f, area),
+            View::InteractiveRebase(view) => view.render(f, area),
+            View::PullRequests(view) => view.render(f, area),
+            View::Issues(view) => view.render(f, area),
+            View::Terminal(view) => view.render(f, area),
+            View::Actions(view) => view.render(f, area),
+        }
+    }
+
+    pub fn update_layout(&mut self, area: Rect) {
+        match self {
+            View::Default => {}
+            View::List(view) => view.update_layout(area),
+            View::Detail(view) => view.update_layout(area),
+            View::Diff(view) => view.update_layout(area),
+            View::UserCommand(view) => view.update_layout(area),
+            View::Refs(view) => view.update_layout(area),
+            View::Help(_) => {}
+            View::Config(_) => {}
+            View::Dialog(_) => {}
+            View::BranchDetail(view) => view.update_layout(area),
+            View::TagDetail(view) => view.update_layout(area),
+            View::Uncommitted(view) => view.update_layout(area),
+            View::FileHistory(view) => view.update_layout(area),
+            View::Blame(view) => view.update_layout(area),
+            View::Compare(view) => view.update_layout(area),
+            View::Conflict(view) => view.update_layout(area),
+            View::InteractiveRebase(view) => view.update_layout(area),
+            View::PullRequests(view) => view.update_layout(area),
+            View::Issues(view) => view.update_layout(area),
+            View::Terminal(_) => {}
+            View::Actions(view) => view.update_layout(area),
+        }
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        match self {
+            View::Default => {}
+            View::List(view) => view.prepare_graph_uploads(),
+            View::Detail(view) => view.prepare_graph_uploads(),
+            View::Diff(view) => view.prepare_graph_uploads(),
+            View::UserCommand(view) => view.prepare_graph_uploads(),
+            View::Refs(view) => view.prepare_graph_uploads(),
+            View::Help(_) => {}
+            View::Config(view) => view.prepare_graph_uploads(),
+            View::Dialog(_) => {}
+            View::BranchDetail(view) => view.prepare_graph_uploads(),
+            View::TagDetail(view) => view.prepare_graph_uploads(),
+            View::Uncommitted(view) => view.prepare_graph_uploads(),
+            View::FileHistory(view) => view.prepare_graph_uploads(),
+            View::Blame(view) => view.prepare_graph_uploads(),
+            View::Compare(view) => view.prepare_graph_uploads(),
+            View::Conflict(view) => view.prepare_graph_uploads(),
+            View::InteractiveRebase(view) => view.prepare_graph_uploads(),
+            View::PullRequests(view) => view.prepare_graph_uploads(),
+            View::Issues(view) => view.prepare_graph_uploads(),
+            View::Terminal(_) => {}
+            View::Actions(view) => view.prepare_graph_uploads(),
+        }
+    }
+
+    pub fn clear_graph_images(&mut self) {
+        match self {
+            View::List(view) => view.clear_graph_images(),
+            View::Detail(view) => view.clear_graph_images(),
+            View::Diff(view) => view.clear_graph_images(),
+            View::UserCommand(view) => view.clear_graph_images(),
+            View::Refs(view) => view.clear_graph_images(),
+            View::BranchDetail(view) => view.clear_graph_images(),
+            View::TagDetail(view) => view.clear_graph_images(),
+            View::Uncommitted(view) => view.clear_graph_images(),
+            View::FileHistory(view) => view.clear_graph_images(),
+            View::Blame(view) => view.clear_graph_images(),
+            View::Compare(view) => view.clear_graph_images(),
+            View::Conflict(view) => view.clear_graph_images(),
+            View::InteractiveRebase(view) => view.clear_graph_images(),
+            View::PullRequests(view) => view.clear_graph_images(),
+            View::Issues(view) => view.clear_graph_images(),
+            View::Terminal(view) => view.clear_graph_images(),
+            _ => {}
+        }
+    }
+
+    pub fn dialog_area(&self) -> Option<ratatui::layout::Rect> {
+        if let View::Dialog(view) = self {
+            Some(view.dialog_area())
+        } else {
+            None
+        }
+    }
+
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        match self {
+            View::Detail(view) => view.drain_pending_avatar_deletes(),
+            View::Config(view) => view.drain_pending_avatar_deletes(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        match self {
+            View::Default => Vec::new(),
+            View::List(view) => view.drain_pending_graph_uploads(),
+            View::Detail(view) => view.drain_pending_graph_uploads(),
+            View::Diff(view) => view.drain_pending_graph_uploads(),
+            View::UserCommand(view) => view.drain_pending_graph_uploads(),
+            View::Refs(view) => view.drain_pending_graph_uploads(),
+            View::Help(_) => Vec::new(),
+            View::Config(view) => view.drain_pending_graph_uploads(),
+            View::Dialog(_) => Vec::new(),
+            View::BranchDetail(view) => view.drain_pending_graph_uploads(),
+            View::TagDetail(view) => view.drain_pending_graph_uploads(),
+            View::Uncommitted(view) => view.drain_pending_graph_uploads(),
+            View::FileHistory(view) => view.drain_pending_graph_uploads(),
+            View::Blame(view) => view.drain_pending_graph_uploads(),
+            View::Compare(view) => view.drain_pending_graph_uploads(),
+            View::Conflict(view) => view.drain_pending_graph_uploads(),
+            View::InteractiveRebase(view) => view.drain_pending_graph_uploads(),
+            View::PullRequests(view) => view.drain_pending_graph_uploads(),
+            View::Issues(view) => view.drain_pending_graph_uploads(),
+            View::Terminal(_) => Vec::new(),
+            View::Actions(view) => view.drain_pending_graph_uploads(),
+        }
+    }
+
+    pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
+        match self {
+            View::Default => Vec::new(),
+            View::List(view) => view.graph_image_ids_sorted(),
+            View::Detail(view) => view.graph_image_ids_sorted(),
+            View::Diff(view) => view.graph_image_ids_sorted(),
+            View::UserCommand(view) => view.graph_image_ids_sorted(),
+            View::Refs(view) => view.graph_image_ids_sorted(),
+            View::Help(view) => view.graph_image_ids_sorted(),
+            View::Config(view) => view.graph_image_ids_sorted(),
+            View::Dialog(_) => Vec::new(),
+            View::BranchDetail(view) => view.graph_image_ids_sorted(),
+            View::TagDetail(view) => view.graph_image_ids_sorted(),
+            View::Uncommitted(view) => view.graph_image_ids_sorted(),
+            View::FileHistory(view) => view.graph_image_ids_sorted(),
+            View::Blame(view) => view.graph_image_ids_sorted(),
+            View::Compare(view) => view.graph_image_ids_sorted(),
+            View::Conflict(view) => view.graph_image_ids_sorted(),
+            View::InteractiveRebase(view) => view.graph_image_ids_sorted(),
+            View::PullRequests(view) => view.graph_image_ids_sorted(),
+            View::Issues(view) => view.graph_image_ids_sorted(),
+            View::Terminal(view) => view.graph_image_ids_sorted(),
+            View::Actions(view) => view.graph_image_ids_sorted(),
+        }
+    }
+
+    pub fn is_search_active(&self) -> bool {
+        match self {
+            View::Default => false,
+            View::List(view) => view.as_list_state().search_state().is_active(),
+            View::Detail(view) => view.as_list_state().search_state().is_active(),
+            View::Diff(view) => view
+                .as_list_state()
+                .is_some_and(|s| s.search_state().is_active()),
+            View::UserCommand(view) => view.as_list_state().search_state().is_active(),
+            View::Refs(view) => view.as_list_state().search_state().is_active(),
+            View::Help(view) => view.is_search_active(),
+            View::Config(view) => view.is_search_active(),
+            View::Dialog(_) => false,
+            View::BranchDetail(_) => false,
+            View::TagDetail(_) => false,
+            View::Uncommitted(_) => false,
+            View::FileHistory(_) => false,
+            View::Blame(_) => false,
+            View::Compare(_) => false,
+            View::Conflict(_) => false,
+            View::InteractiveRebase(_) => false,
+            View::PullRequests(_) => false,
+            View::Issues(_) => false,
+            View::Terminal(_) => false,
+            View::Actions(_) => false,
+        }
+    }
+
+    pub fn is_search_querying(&self) -> bool {
+        match self {
+            View::Default => false,
+            View::List(view) => view.as_list_state().search_state().is_querying(),
+            View::Detail(view) => view.as_list_state().search_state().is_querying(),
+            View::Diff(view) => view
+                .as_list_state()
+                .is_some_and(|s| s.search_state().is_querying()),
+            View::UserCommand(view) => view.as_list_state().search_state().is_querying(),
+            View::Refs(view) => view.as_list_state().search_state().is_querying(),
+            View::Help(view) => view.is_search_querying(),
+            View::Config(view) => view.is_search_querying(),
+            View::Dialog(_) => false,
+            View::BranchDetail(_) => false,
+            View::TagDetail(_) => false,
+            View::Uncommitted(_) => false,
+            View::FileHistory(_) => false,
+            View::Blame(_) => false,
+            View::Compare(_) => false,
+            View::Conflict(_) => false,
+            View::InteractiveRebase(_) => false,
+            View::PullRequests(_) => false,
+            View::Issues(_) => false,
+            View::Terminal(_) => false,
+            View::Actions(_) => false,
+        }
+    }
+
+    /// Returns `(ignore_case, fuzzy, regex)` of the active search modifier
+    /// state, or `None` when search isn't active. Used by the status-bar
+    /// footer hint to render `[ON]/[OFF]` for each modifier.
+    pub fn search_case_fuzzy_regex(&self) -> Option<(bool, bool, bool)> {
+        match self {
+            View::Default => None,
+            View::List(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Detail(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Diff(view) => view
+                .as_list_state()
+                .and_then(|s| s.search_case_fuzzy_regex()),
+            View::UserCommand(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Refs(view) => view.as_list_state().search_case_fuzzy_regex(),
+            View::Help(view) => view.search_case_fuzzy_regex(),
+            View::Config(view) => view.search_case_fuzzy_regex(),
+            View::Dialog(_) => None,
+            View::BranchDetail(_) => None,
+            View::TagDetail(_) => None,
+            View::Uncommitted(_) => None,
+            View::FileHistory(_) => None,
+            View::Blame(_) => None,
+            View::Compare(_) => None,
+            View::Conflict(_) => None,
+            View::InteractiveRebase(_) => None,
+            View::PullRequests(_) => None,
+            View::Issues(_) => None,
+            View::Terminal(_) => None,
+            View::Actions(_) => None,
+        }
+    }
+
+    pub fn is_config_active(&self) -> bool {
+        matches!(self, View::Config(_))
+    }
+
+    pub fn diff_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Diff(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn uncommitted_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Uncommitted(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn config_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Config(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn compare_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Compare(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn blame_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Blame(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn file_history_footer_hint(&self) -> Option<String> {
+        match self {
+            View::FileHistory(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    /// Returns the current 2-commit-compare state for the List view, used by
+    /// the status bar to swap into a dedicated "Comparison: <a> → <b>" mode.
+    /// `Some((marked, selected))` means a mark is active in the List view;
+    /// `selected` is the commit currently under the cursor (may equal `marked`
+    /// when the cursor is back on the marked row, and may be `None` when the
+    /// cursor sits on the Uncommitted Changes row).
+    pub fn list_compare_pending(
+        &self,
+    ) -> Option<(crate::git::CommitHash, Option<crate::git::CommitHash>)> {
+        match self {
+            View::List(view) => {
+                let state = view.as_list_state();
+                state.marked_compare_commit().map(|marked| {
+                    let cursor = if state.is_uncommitted_selected() {
+                        None
+                    } else {
+                        Some(state.selected_commit_hash().clone())
+                    };
+                    (marked.clone(), cursor)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn of_list(
+        commit_list_state: CommitListState<'a>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::List(Box::new(ListView::new(commit_list_state, ctx, tx)))
+    }
+
+    pub fn of_detail(
+        commit_list_state: CommitListState<'a>,
+        commit: Commit,
+        changes: Vec<FileChange>,
+        refs: Vec<Ref>,
+        head_branch_name: Option<String>,
+        head_commit_hash: Option<CommitHash>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Detail(Box::new(DetailView::new(
+            commit_list_state,
+            commit,
+            changes,
+            refs,
+            head_branch_name,
+            head_commit_hash,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_diff_with_entries(
+        commit_list_state: CommitListState<'a>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+        title: String,
+        commit_hash: String,
+        all_file_paths: Vec<(String, bool)>,
+        repo_path: std::path::PathBuf,
+    ) -> Self {
+        View::Diff(Box::new(DiffView::new(
+            Some(commit_list_state),
+            diff_entries,
+            ctx,
+            tx,
+            title,
+            commit_hash,
+            all_file_paths,
+            repo_path,
+        )))
+    }
+
+    pub fn of_uncommitted_diff(
+        commit_list_state: Option<CommitListState<'a>>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+        title: String,
+        all_file_paths: Vec<(String, bool)>,
+        repo_path: std::path::PathBuf,
+    ) -> Self {
+        View::Diff(Box::new(DiffView::new(
+            commit_list_state,
+            diff_entries,
+            ctx,
+            tx,
+            title,
+            String::new(),
+            all_file_paths,
+            repo_path,
+        )))
+    }
+
+    pub fn of_user_command(
+        commit_list_state: CommitListState<'a>,
+        command_output: String,
+        user_command_number: usize,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::UserCommand(Box::new(UserCommandView::new(
+            commit_list_state,
+            command_output,
+            user_command_number,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_refs(
+        commit_list_state: CommitListState<'a>,
+        refs: Vec<Ref>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Refs(Box::new(RefsView::new(commit_list_state, refs, ctx, tx)))
+    }
+
+    pub fn of_help(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
+        View::Help(Box::new(HelpView::new(before, ctx, tx)))
+    }
+
+    /// The command output, shown in place of the commit list while a command
+    /// runs or has finished.
+    pub fn of_terminal(
+        before: View<'a>,
+        session: SessionView,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Terminal(Box::new(TerminalView::new(before, session, ctx, tx)))
+    }
+
+    pub fn of_config(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
+        View::Config(Box::new(ConfigView::new(before, ctx, tx)))
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        match self {
+            View::List(view) => view.handle_click(col, row),
+            View::Detail(view) => view.handle_click(col, row),
+            View::Diff(view) => view.handle_click(col, row),
+            View::UserCommand(view) => view.handle_click(col, row),
+            View::Refs(view) => view.handle_click(col, row),
+            View::Config(view) => view.handle_click(col, row),
+            View::Dialog(view) => view.handle_click(col, row),
+            View::BranchDetail(view) => view.handle_click(col, row),
+            View::TagDetail(view) => view.handle_click(col, row),
+            View::Uncommitted(view) => view.handle_click(col, row),
+            View::FileHistory(view) => view.handle_click(col, row),
+            View::Blame(view) => view.handle_click(col, row),
+            View::Compare(view) => view.handle_click(col, row),
+            View::Conflict(view) => view.handle_click(col, row),
+            View::InteractiveRebase(view) => view.handle_click(col, row),
+            View::PullRequests(view) => view.handle_click(col, row),
+            View::Issues(view) => view.handle_click(col, row),
+            View::Actions(view) => view.handle_click(col, row),
+            View::Help(view) => view.handle_click(col, row),
+            _ => {}
+        }
+    }
+
+    /// Ctrl+click variant: only meaningful for the List view (drives the
+    /// 2-commit compare flow). Other views fall back to a plain click so the
+    /// modifier is silently ignored where it has no semantic.
+    pub fn handle_shift_click(&mut self, col: u16, row: u16) {
+        match self {
+            View::List(view) => view.handle_shift_click(col, row),
+            _ => self.handle_click(col, row),
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
+        match self {
+            View::List(view) => view.handle_mouse_move(col, row),
+            View::Detail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Diff(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Refs(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Config(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Dialog(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::BranchDetail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::TagDetail(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Uncommitted(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Blame(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::FileHistory(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Compare(view) => view.handle_mouse_move(col, row),
+            View::Conflict(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::InteractiveRebase(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::PullRequests(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Issues(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Actions(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            View::Help(view) => {
+                view.handle_mouse_move(col, row);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn refresh(&mut self) {
+        match self {
+            View::Default => {}
+            View::List(view) => view.refresh(),
+            View::Detail(view) => view.refresh(),
+            View::Diff(view) => view.refresh(),
+            View::UserCommand(view) => view.refresh(),
+            View::Refs(view) => view.refresh(),
+            View::Help(_) => {}
+            View::Config(_) => {}
+            View::Dialog(_) => {}
+            View::BranchDetail(view) => view.refresh(),
+            View::TagDetail(view) => view.refresh(),
+            View::Uncommitted(view) => view.refresh(),
+            View::FileHistory(view) => view.refresh(),
+            View::Blame(view) => view.refresh(),
+            View::Compare(view) => view.refresh(),
+            View::Conflict(view) => view.refresh(),
+            View::InteractiveRebase(view) => view.refresh(),
+            View::PullRequests(view) => view.refresh(),
+            View::Issues(view) => view.refresh(),
+            View::Terminal(_) => {}
+            View::Actions(view) => view.refresh(),
+        }
+    }
+
+    pub fn is_input_active(&self) -> bool {
+        match self {
+            View::Config(view) => view.is_editing_text(),
+            View::Dialog(view) => view.is_input_focused(),
+            // DiffView's own search has its own input mode, must be flagged here
+            // so that keys with no UserEvent mapping (Backspace, Delete) still flow
+            // to the view instead of being dropped by the app key router.
+            View::Diff(view) => view.is_search_input_active(),
+            View::InteractiveRebase(view) => view.is_input_active(),
+            View::PullRequests(view) => view.is_input_active(),
+            View::Issues(view) => view.is_input_active(),
+            View::Actions(view) => view.is_input_active(),
+            _ => false,
+        }
+    }
+
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        match self {
+            View::Default => {}
+            View::List(v) => v.update_color_theme(theme),
+            View::Detail(v) => v.update_color_theme(theme),
+            View::Diff(v) => v.update_color_theme(theme),
+            View::UserCommand(v) => v.update_color_theme(theme),
+            View::Refs(v) => v.update_color_theme(theme),
+            View::Help(v) => v.update_color_theme(theme),
+            View::Config(v) => v.update_color_theme(theme),
+            View::Dialog(v) => v.update_color_theme(theme),
+            View::BranchDetail(v) => v.update_color_theme(theme),
+            View::TagDetail(v) => v.update_color_theme(theme),
+            View::Uncommitted(v) => v.update_color_theme(theme),
+            View::FileHistory(v) => v.update_color_theme(theme),
+            View::Blame(v) => v.update_color_theme(theme),
+            View::Compare(v) => v.update_color_theme(theme),
+            View::Conflict(v) => v.update_color_theme(theme),
+            View::InteractiveRebase(v) => v.update_color_theme(theme),
+            View::PullRequests(v) => v.update_color_theme(theme),
+            View::Issues(v) => v.update_color_theme(theme),
+            View::Terminal(v) => v.update_color_theme(theme),
+            View::Actions(v) => v.update_color_theme(theme),
+        }
+    }
+
+    pub fn of_compare(
+        commit_list_state: CommitListState<'a>,
+        diff_entries: Vec<crate::git::diff::DiffEntry>,
+        older_hash: String,
+        newer_hash: String,
+        repo_path: std::path::PathBuf,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Compare(Box::new(CompareView::new(
+            commit_list_state,
+            diff_entries,
+            older_hash,
+            newer_hash,
+            repo_path,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_file_history(
+        commit_list_state: Option<CommitListState<'a>>,
+        file_path: String,
+        entries: Vec<crate::git::actions::FileHistoryEntry>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::FileHistory(Box::new(FileHistoryView::new(
+            commit_list_state,
+            file_path,
+            entries,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_conflict(
+        commit_list_state: Option<CommitListState<'a>>,
+        repo_path: std::path::PathBuf,
+        file: crate::git::conflict::ConflictFile,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Conflict(Box::new(ConflictView::new(
+            commit_list_state,
+            repo_path,
+            file,
+            ctx,
+            tx,
+        )))
+    }
+
+    /// Conflict-editor footer hint. Status bar pulls this when active.
+    pub fn conflict_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Conflict(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn of_interactive_rebase(
+        commit_list_state: Option<CommitListState<'a>>,
+        repo_path: std::path::PathBuf,
+        base_hash: String,
+        items: Vec<crate::git::rebase::RebaseItem>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::InteractiveRebase(Box::new(InteractiveRebaseView::new(
+            commit_list_state,
+            repo_path,
+            base_hash,
+            items,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn interactive_rebase_footer_hint(&self) -> Option<String> {
+        match self {
+            View::InteractiveRebase(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn of_pull_requests(
+        commit_list_state: Option<CommitListState<'a>>,
+        coords: crate::github::RepoCoords,
+        token: String,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::PullRequests(Box::new(PullRequestsView::new(
+            commit_list_state,
+            coords,
+            token,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn pull_requests_footer_hint(&self) -> Option<String> {
+        match self {
+            View::PullRequests(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn of_issues(
+        commit_list_state: Option<CommitListState<'a>>,
+        coords: crate::github::RepoCoords,
+        token: String,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Issues(Box::new(IssuesView::new(
+            commit_list_state,
+            coords,
+            token,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_actions(
+        commit_list_state: Option<CommitListState<'a>>,
+        coords: crate::github::RepoCoords,
+        token: String,
+        branch: Option<String>,
+        open_run: Option<crate::github::actions::Run>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Actions(Box::new(ActionsView::new(
+            commit_list_state,
+            coords,
+            token,
+            branch,
+            open_run,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn actions_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Actions(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn issues_footer_hint(&self) -> Option<String> {
+        match self {
+            View::Issues(view) => Some(view.footer_hint()),
+            _ => None,
+        }
+    }
+
+    pub fn of_blame(
+        commit_list_state: Option<CommitListState<'a>>,
+        file_path: String,
+        lines: Vec<crate::git::blame::BlameLine>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::Blame(Box::new(BlameView::new(
+            commit_list_state,
+            file_path,
+            lines,
+            ctx,
+            tx,
+        )))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum RefreshViewContext {
+    List {
+        list_context: ListRefreshViewContext,
+        pending_notification: Option<String>,
+    },
+    Detail {
+        list_context: ListRefreshViewContext,
+    },
+    Diff {
+        list_context: ListRefreshViewContext,
+    },
+    UserCommand {
+        list_context: ListRefreshViewContext,
+        user_command_context: UserCommandRefreshViewContext,
+    },
+    Refs {
+        list_context: ListRefreshViewContext,
+        refs_context: RefsRefreshViewContext,
+    },
+}
+
+impl RefreshViewContext {
+    pub fn list_context(&self) -> &ListRefreshViewContext {
+        match self {
+            RefreshViewContext::List { list_context, .. }
+            | RefreshViewContext::Detail { list_context }
+            | RefreshViewContext::Diff { list_context }
+            | RefreshViewContext::UserCommand { list_context, .. }
+            | RefreshViewContext::Refs { list_context, .. } => list_context,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ListRefreshViewContext {
+    pub commit_hash: String,
+    pub selected: usize,
+    pub height: usize,
+    pub scroll_to_top: bool,
+}
+
+impl From<&CommitListState<'_>> for ListRefreshViewContext {
+    fn from(list_state: &CommitListState) -> Self {
+        let commit_hash = list_state.selected_commit_hash().as_str().into();
+        let (selected, offset, height) = list_state.current_list_status();
+        // If the selected commit is the top one and there is no offset, it means the list is already scrolled to the top.
+        // In this case, we set scroll_to_top to true to indicate that the view should be scrolled to the top after refresh.
+        let scroll_to_top = selected == 0 && offset == 0;
+        ListRefreshViewContext {
+            commit_hash,
+            selected,
+            height,
+            scroll_to_top,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UserCommandRefreshViewContext {
+    pub n: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct RefsRefreshViewContext {
+    pub selected: Vec<String>,
+    pub opened: Vec<Vec<String>>,
+}

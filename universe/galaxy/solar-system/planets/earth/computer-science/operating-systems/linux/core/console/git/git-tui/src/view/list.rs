@@ -1,0 +1,709 @@
+use std::rc::Rc;
+
+use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
+
+use crate::{
+    app::AppContext,
+    config::save,
+    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    git::CommitHash,
+    view::{ListRefreshViewContext, RefreshViewContext},
+    widget::commit_list::{CommitList, CommitListState, SearchState},
+};
+
+#[derive(Debug)]
+pub struct ListView<'a> {
+    commit_list_state: Option<CommitListState<'a>>,
+
+    ctx: Rc<AppContext>,
+    tx: Sender,
+}
+
+impl<'a> ListView<'a> {
+    pub fn new(
+        commit_list_state: CommitListState<'a>,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> ListView<'a> {
+        ListView {
+            commit_list_state: Some(commit_list_state),
+            ctx,
+            tx,
+        }
+    }
+
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        let event = event_with_count.event;
+        let count = event_with_count.count;
+        if let SearchState::Searching { .. } = self.as_list_state().search_state() {
+            match event {
+                UserEvent::Confirm => {
+                    self.as_mut_list_state().apply_search();
+                    self.update_matched_message();
+                }
+                UserEvent::Cancel => {
+                    self.as_mut_list_state().cancel_search();
+                    self.clear_search_query();
+                }
+                _ => {
+                    self.as_mut_list_state().handle_search_input(key);
+                    self.update_search_query();
+                }
+            }
+            return;
+        } else {
+            // Commit-list-scoped actions: `[scope.list]` overrides the
+            // global UserEvent map for keys that have a list-specific
+            // meaning. Currently `select_head_commit` (default `h`,
+            // taking precedence over the global `navigate_left` which
+            // is a no-op in this vertical list).
+            match self.ctx.keybind.resolve_scoped(&["list"], key) {
+                Some("select_head_commit") => {
+                    self.as_mut_list_state().select_head_commit();
+                    return;
+                }
+                Some("terminal") => {
+                    self.tx.send(AppEvent::OpenTerminal);
+                    return;
+                }
+                Some("actions") => {
+                    self.tx.send(AppEvent::OpenActions { run: None });
+                    return;
+                }
+                _ => {}
+            }
+            // Hard cap on the repeat count so an absurd numeric
+            // prefix (the user typed `5000000000000` and pressed an
+            // arrow) doesn't spin the main thread for hours
+            // calling no-op select_*'s. The commit list has at
+            // most `total` rows, so any iteration past that is
+            // wasted; we clamp to that and add a 1-row floor so
+            // an empty list still gets one "no-op" call (cheap).
+            let count = {
+                let total = self.as_list_state().total().max(1);
+                count.min(total)
+            };
+            match event {
+                UserEvent::Quit => {
+                    self.tx.send(AppEvent::Quit);
+                }
+                UserEvent::NavigateDown | UserEvent::SelectDown => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().select_next();
+                    }
+                }
+                UserEvent::NavigateUp | UserEvent::SelectUp => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().select_prev();
+                    }
+                }
+                UserEvent::GoToParent => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().select_parent();
+                    }
+                }
+                UserEvent::GoToTop => {
+                    self.as_mut_list_state().select_first();
+                }
+                UserEvent::GoToBottom => {
+                    self.as_mut_list_state().select_last();
+                }
+                UserEvent::ScrollDown => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_down();
+                    }
+                }
+                UserEvent::ScrollUp => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_up();
+                    }
+                }
+                UserEvent::PageDown => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_down_page();
+                    }
+                }
+                UserEvent::PageUp => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_up_page();
+                    }
+                }
+                UserEvent::HalfPageDown => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_down_half();
+                    }
+                }
+                UserEvent::HalfPageUp => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_up_half();
+                    }
+                }
+                UserEvent::SelectTop => {
+                    self.as_mut_list_state().select_high();
+                }
+                UserEvent::SelectMiddle => {
+                    self.as_mut_list_state().select_middle();
+                }
+                UserEvent::SelectBottom => {
+                    self.as_mut_list_state().select_low();
+                }
+                UserEvent::ShortCopy => {
+                    self.copy_commit_hash();
+                }
+                UserEvent::FullCopy => {
+                    self.copy_commit_message();
+                }
+                UserEvent::Search => {
+                    self.as_mut_list_state().start_search();
+                    self.update_search_query();
+                }
+                UserEvent::UserCommand(n) => {
+                    self.tx.send(AppEvent::OpenUserCommand(n));
+                }
+                UserEvent::HelpToggle => {
+                    self.tx.send(AppEvent::OpenHelp);
+                }
+                UserEvent::Cancel => {
+                    // Esc clears the compare-pending mark first (highest
+                    // priority "exit this mode" action), then falls through
+                    // to clearing search if applicable.
+                    if self.as_list_state().marked_compare_commit().is_some() {
+                        self.as_mut_list_state().clear_compare_mark();
+                    }
+                    self.as_mut_list_state().cancel_search();
+                    self.clear_search_query();
+                }
+                UserEvent::MarkCompare => {
+                    self.handle_mark_compare();
+                }
+                UserEvent::Confirm => {
+                    if let SearchState::Applied { .. } = self.as_list_state().search_state() {
+                        self.as_mut_list_state().cancel_search();
+                        self.clear_search_query();
+                    }
+                    if self.as_list_state().is_uncommitted_selected() {
+                        self.tx.send(AppEvent::OpenUncommitted);
+                    } else {
+                        self.tx.send(AppEvent::OpenDetail);
+                    }
+                }
+                UserEvent::RefList => {
+                    self.tx.send(AppEvent::OpenRefs);
+                }
+                UserEvent::Refresh => {
+                    self.refresh();
+                    // `r` is also the way to ask "has CI started?".
+                    self.tx.send(AppEvent::CiPoke);
+                }
+                UserEvent::Push => {
+                    self.tx.send(AppEvent::PushCurrentBranch);
+                }
+                UserEvent::Pull => {
+                    self.tx.send(AppEvent::PullCurrentBranch);
+                }
+                UserEvent::AbortOperation => {
+                    self.tx.send(AppEvent::CheckAbortOperation);
+                }
+                // `e` from the commit list resumes a paused rebase
+                // (the chip `⏸ rebase paused (e:resume)` advertises
+                // this). Outside the rebase-in-progress case the event
+                // has no meaning here, falls through to the `_` arm
+                // for a silent no-op. Empty `base_hash` routes through
+                // the resume short-circuit in `open_dialog` /
+                // `OpenInteractiveRebase`.
+                UserEvent::Rebase
+                    if crate::git::rebase::rebase_in_progress(self.ctx.repo_path.as_path()) =>
+                {
+                    self.tx.send(AppEvent::OpenInteractiveRebase {
+                        base_hash: String::new(),
+                    });
+                }
+                UserEvent::Config => {
+                    self.tx.send(AppEvent::OpenConfig);
+                }
+                // Horizontal scroll over the graph lanes when the native
+                // graph image is wider than the column cap (rust-lang/rust,
+                // linux, …). No-op on small repos where everything fits.
+                // Gated to the non-search branch - inside `SearchState::
+                // Applied` the same keys cycle search matches (see below).
+                UserEvent::NavigateLeft => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_graph_left(1);
+                    }
+                }
+                UserEvent::NavigateRight => {
+                    for _ in 0..count {
+                        self.as_mut_list_state().scroll_graph_right(1);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let SearchState::Applied { .. } = self.as_list_state().search_state() {
+            match event {
+                // Cycling through matches uses Left / Right arrows
+                // (or h / l in the global keymap), replaces the old
+                // n / Shift+N vim-style bindings, which now leave the
+                // commit-list search alone and stay free for future
+                // global use.
+                UserEvent::NavigateRight => {
+                    self.as_mut_list_state().select_next_match();
+                    self.update_matched_message();
+                }
+                UserEvent::NavigateLeft => {
+                    self.as_mut_list_state().select_prev_match();
+                    self.update_matched_message();
+                }
+                UserEvent::IgnoreCaseToggle => {
+                    if let Some((ignore_case, fuzzy)) =
+                        self.as_mut_list_state().toggle_ignore_case()
+                    {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
+                UserEvent::FuzzyToggle => {
+                    if let Some((ignore_case, fuzzy)) = self.as_mut_list_state().toggle_fuzzy() {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
+                // `x` (UserEvent::Discard) is repurposed here as the regex
+                // toggle. The keymap is global (one key → one UserEvent), so
+                // we can't add a separate UserEvent::RegexToggle bound to `x`
+                // without colliding with the existing `x → Discard` binding
+                // used by the Uncommitted view. Instead we intercept Discard
+                // only inside the SearchState::Applied block, outside this
+                // block the list view ignores Discard, preserving the
+                // Uncommitted view's discard semantics.
+                UserEvent::Discard => {
+                    if let Some((ignore_case, fuzzy, regex)) =
+                        self.as_mut_list_state().toggle_regex()
+                    {
+                        let ctx = Rc::make_mut(&mut self.ctx);
+                        ctx.core_config.search.ignore_case = ignore_case;
+                        ctx.core_config.search.fuzzy = fuzzy;
+                        ctx.core_config.search.regex = regex;
+                        let _ = save(&ctx.core_config, &ctx.ui_config);
+                    }
+                    self.update_matched_message();
+                }
+                UserEvent::Cancel => {
+                    self.as_mut_list_state().cancel_search();
+                    self.clear_search_query();
+                }
+                _ => {}
+            }
+            // Do not return here
+        }
+
+        // Re-anchor the "Match X of Y" footer to whatever the cursor
+        // landed on after this event. Cheap (single index lookup) +
+        // gated to SearchState::Applied inside the helper, so it's a
+        // no-op outside search mode.
+        self.maybe_sync_search_status();
+    }
+
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        let commit_list = CommitList::new(self.ctx.clone());
+        f.render_stateful_widget(commit_list, area, self.as_mut_list_state());
+    }
+
+    pub fn update_layout(&mut self, area: Rect) {
+        let height = if area.height >= 2 {
+            area.height - 2
+        } else {
+            area.height
+        };
+        self.as_mut_list_state().update_height(height as usize);
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        // Skip the SVG/PNG generation + terminal-image upload entirely
+        // when the user has disabled the graph column OR when bg
+        // streaming is still in flight. During streaming, the
+        // foreground's Graph covers only the initial fg-loaded slice
+        // (~500 commits). Generating graph images now would bake stale
+        // topology into the Kitty image cache - even though
+        // ReplaceGraph later clears prepared_image_map, the terminal
+        // may have residual placements from the stale upload pass that
+        // produce visual glitches (wrong colours, dangling
+        // connections at the fg/bg boundary). Deferring all image
+        // generation until bg is done AND ReplaceGraph has swapped in
+        // the full topology ensures every image is built from the
+        // correct Graph.
+        let bg_streaming = self
+            .ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire);
+        if self.ctx.ui_config.list.graph_enabled && !bg_streaming {
+            self.as_mut_list_state().ensure_visible_graph_uploaded();
+        }
+        let ctx = self.ctx.clone();
+        self.as_mut_list_state().ensure_visible_avatars_uploaded(
+            &mut ctx.avatar_manager.lock().unwrap(),
+            ctx.color_theme.bg,
+            ctx.color_theme.list_selected_bg,
+        );
+    }
+
+    pub fn clear_graph_images(&mut self) {
+        self.as_mut_list_state().clear_graph_images();
+    }
+}
+
+impl<'a> ListView<'a> {
+    pub fn take_list_state(&mut self) -> CommitListState<'a> {
+        self.commit_list_state.take().unwrap()
+    }
+
+    pub fn as_mut_list_state(&mut self) -> &mut CommitListState<'a> {
+        self.commit_list_state.as_mut().unwrap()
+    }
+
+    pub fn as_list_state(&self) -> &CommitListState<'a> {
+        self.commit_list_state.as_ref().unwrap()
+    }
+
+    /// Number of lanes of the graph being shown, `None` while the list
+    /// state is taken out (a detail view is open over it).
+    pub fn graph_lane_count(&self) -> Option<usize> {
+        self.commit_list_state
+            .as_ref()
+            .map(|state| state.graph().max_pos_x + 1)
+    }
+
+    /// Mutable accessor for the bg streaming loader. Returns
+    /// `None` if the list state has been taken (e.g. mid-Detail
+    /// open). Used by `AppEvent::AppendCommits` to push freshly
+    /// loaded `CommitInfo` batches into the live list.
+    pub fn commit_list_state_ref(&self) -> Option<&CommitListState<'a>> {
+        self.commit_list_state.as_ref()
+    }
+
+    pub fn commit_list_state_mut(&mut self) -> Option<&mut CommitListState<'a>> {
+        self.commit_list_state.as_mut()
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        self.as_mut_list_state().drain_pending_graph_uploads()
+    }
+
+    pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
+        self.as_list_state().graph_image_ids_sorted()
+    }
+
+    fn update_search_query(&self) {
+        if let SearchState::Searching { .. } = self.as_list_state().search_state() {
+            let list_state = self.as_list_state();
+            if let Some(query) = list_state.search_query_string() {
+                let cursor_pos = list_state.search_query_cursor_position();
+                let transient_msg = list_state.transient_message_string();
+                self.tx.send(AppEvent::UpdateStatusInput(
+                    query,
+                    Some(cursor_pos),
+                    transient_msg,
+                ));
+            }
+        }
+    }
+
+    fn clear_search_query(&self) {
+        self.tx.send(AppEvent::ClearStatusLine);
+    }
+
+    fn update_matched_message(&self) {
+        if let Some((msg, matched)) = self.as_list_state().matched_query_string() {
+            // Sticky variant, stays visible the entire time search is
+            // applied, not just for the 2 s notification window.
+            self.tx.send(AppEvent::SetSearchStatus {
+                msg,
+                warn: !matched,
+            });
+        } else {
+            self.tx.send(AppEvent::ClearStatusLine);
+        }
+    }
+
+    /// Re-anchor the "Match X of Y" footer to the currently-selected
+    /// row, then re-emit it. Used as a hook after every navigation
+    /// event (arrows, page jumps, mouse hover) so the index follows
+    /// the cursor instead of trailing the last cycle. No-op outside
+    /// SearchState::Applied.
+    fn maybe_sync_search_status(&mut self) {
+        if matches!(
+            self.as_list_state().search_state(),
+            SearchState::Applied { .. }
+        ) {
+            self.as_mut_list_state().sync_match_index_to_selected();
+            self.update_matched_message();
+        }
+    }
+
+    fn copy_commit_hash(&self) {
+        let selected = self.as_list_state().selected_commit_hash();
+        self.copy_to_clipboard("Commit SHA".into(), selected.as_str().into());
+    }
+
+    fn copy_commit_message(&self) {
+        if let Some(commit_message) = self.as_list_state().selected_commit_message() {
+            self.copy_to_clipboard("Commit message".into(), commit_message.into());
+        }
+    }
+
+    fn copy_to_clipboard(&self, name: String, value: String) {
+        self.tx.send(AppEvent::CopyToClipboard { name, value });
+    }
+
+    /// Replace the view's `Rc<AppContext>` clone with a fresh one.
+    /// Necessary after `App::close_config` calls `Rc::make_mut` on the
+    /// app's ctx: that COWs the inner data because the view also holds
+    /// a clone, leaving the view pointing at the pre-change ctx. Every
+    /// in-place setting that relies on the view re-reading ctx fields
+    /// (date_format, github_avatars / avatar_manager, conflict_view,
+    /// rebase_view, diff_mode, …) goes through here. The widget
+    /// (CommitList) is built per frame from `self.ctx.clone()` so the
+    /// next render picks up the new ctx automatically.
+    pub fn replace_ctx(&mut self, ctx: Rc<AppContext>) {
+        self.ctx = ctx;
+    }
+
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        // Re-derive the palette from the freshly-set theme rather than
+        // reading `ctx.graph_color_set`. The shared `AppContext` is
+        // held via `Rc`: when `apply_live_config_theme` mutates
+        // `app.ctx` via `Rc::make_mut`, the runtime forks the inner
+        // value because the view also holds an `Rc` clone, so the
+        // view's local `ctx.graph_color_set` keeps pointing at the
+        // PREVIOUS palette and the rebake uses stale bg + branch
+        // colours. Computing from the new `color_theme` here sidesteps
+        // the fork and guarantees the bake matches the active theme.
+        let new_palette = crate::color::build_graph_color_set(&theme, &self.ctx.graph_config.color);
+        let ctx = std::rc::Rc::make_mut(&mut self.ctx);
+        ctx.color_theme = theme;
+        ctx.graph_color_set = new_palette.clone();
+        self.as_mut_list_state()
+            .invalidate_image_caches_with_palette(&new_palette);
+        self.ctx
+            .avatar_manager
+            .lock()
+            .unwrap()
+            .clear_prepared_images();
+    }
+
+    /// Apply a graph corner style change live (no full app refresh).
+    /// Drops the image cache so the next render rebakes with the
+    /// requested style. Called from `App::close_config` when the user
+    /// flips `graph_style` in the Config view.
+    pub fn update_graph_style(
+        &mut self,
+        style: crate::graph::GraphStyle,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.as_mut_list_state()
+            .update_graph_style(style, graph_color_set);
+    }
+
+    /// Apply a graph cell-width change live (no full app refresh).
+    /// Recomputes pixel params from the new width + active palette,
+    /// drops the image cache. Called from `App::close_config` when
+    /// the user flips `graph_width` in the Config view.
+    pub fn update_cell_width_type(
+        &mut self,
+        cell_width_type: crate::graph::CellWidthType,
+        graph_color_set: &crate::color::GraphColorSet,
+    ) {
+        self.as_mut_list_state()
+            .update_cell_width_type(cell_width_type, graph_color_set);
+    }
+
+    /// Resolve a `Option<GraphWidthType>` (config-level setting, with
+    /// `Auto` deciding from terminal width vs the graph's max column)
+    /// to a concrete `CellWidthType` using the same logic as startup.
+    /// Returns `None` if the terminal size query fails, caller should
+    /// then skip the update gracefully.
+    pub fn resolve_cell_width(
+        &self,
+        graph_width: Option<crate::GraphWidthType>,
+    ) -> Option<crate::graph::CellWidthType> {
+        crate::check::decide_cell_width_type(self.as_list_state().graph(), graph_width).ok()
+    }
+
+    pub fn refresh(&self) {
+        let list_state = self.as_list_state();
+        let list_context = ListRefreshViewContext::from(list_state);
+        let context = RefreshViewContext::List {
+            list_context,
+            pending_notification: None,
+        };
+        self.tx.send(AppEvent::Refresh(context));
+    }
+
+    /// Handle a Ctrl+click in the commit list area: select the row at the
+    /// click position, then drive the same compare flow as Space.
+    /// Mirrors how the mouse already calls `handle_click` for plain Left
+    /// clicks but routes through `handle_mark_compare` afterwards.
+    pub fn handle_shift_click(&mut self, col: u16, row: u16) {
+        // Reuse the existing click-to-select logic so the cursor lands on
+        // the clicked row first.
+        self.handle_click(col, row);
+        self.handle_mark_compare();
+    }
+
+    /// Handle the Space / Ctrl+click action that drives the 2-commit
+    /// comparison flow.
+    ///
+    /// Three cases (decided by what's currently marked vs what's selected):
+    /// 1. No mark yet → mark the selected commit, enter compare-pending mode.
+    /// 2. Mark exists AND cursor is on the SAME commit → toggle off (cancel).
+    /// 3. Mark exists AND cursor is on a DIFFERENT commit → fire OpenCompareDiff.
+    ///
+    /// Uncommitted Changes / stash rows are silently rejected since they have
+    /// no real ancestry to diff against.
+    fn handle_mark_compare(&mut self) {
+        // Reject uncommitted up front, toggle_compare_mark already does this
+        // for case (1), but we also need to short-circuit case (3) where the
+        // cursor lands on uncommitted while a mark is active.
+        if self.as_list_state().is_uncommitted_selected() {
+            return;
+        }
+
+        let marked = self.as_list_state().marked_compare_commit().cloned();
+        let selected = self.as_list_state().selected_commit_hash().clone();
+
+        match marked {
+            Some(mark) if mark != selected => {
+                // Case 3: second endpoint chosen → open the comparison.
+                // Order detection (older → newer) happens in app.rs where the
+                // commit metadata is accessible. Mark is cleared by the
+                // OpenCompareDiff handler so the user starts fresh next time.
+                self.tx.send(AppEvent::OpenCompareDiff {
+                    from_hash: mark.as_str().to_string(),
+                    to_hash: selected.as_str().to_string(),
+                });
+            }
+            _ => {
+                // Cases 1 & 2: toggle the mark on the selected commit.
+                self.as_mut_list_state().toggle_compare_mark();
+            }
+        }
+    }
+
+    pub fn reset_commit_list_with(&mut self, list_context: &ListRefreshViewContext) {
+        let ListRefreshViewContext {
+            commit_hash,
+            selected,
+            height,
+            scroll_to_top,
+        } = list_context;
+        let list_state = self.as_mut_list_state();
+        list_state.reset_height(*height);
+        if *scroll_to_top {
+            list_state.select_first();
+        } else {
+            list_state.select_commit_hash(&CommitHash::from(commit_hash.as_str()));
+            if list_state.total() > *height {
+                list_state.restore_visual_selection(*selected);
+            }
+        }
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        if let Some(list_state) = self.commit_list_state.as_mut() {
+            let header_height = 4u16; // app header (3) + column header (1)
+            if row < header_height {
+                return;
+            }
+
+            if let Some(branch_name) = list_state.branch_at_position(col, row) {
+                self.tx.send(AppEvent::OpenBranchDetail { branch_name });
+                return;
+            }
+            if let Some(tag_name) = list_state.tag_at_position(col, row) {
+                self.tx.send(AppEvent::OpenTagDetail { tag_name });
+                return;
+            }
+
+            let (_, offset, height) = list_state.current_list_status();
+            let row = (row - header_height) as usize;
+            if row < height {
+                let clicked_index = offset + row;
+                if clicked_index < list_state.total() {
+                    list_state.select(clicked_index);
+                    let is_uncommitted = list_state.is_uncommitted_selected();
+                    if list_state.search_state().is_active() {
+                        list_state.cancel_search();
+                        self.clear_search_query();
+                    }
+                    if is_uncommitted {
+                        self.tx.send(AppEvent::OpenUncommitted);
+                    } else {
+                        self.tx.send(AppEvent::OpenDetail);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) -> bool {
+        let Some(list_state) = self.commit_list_state.as_mut() else {
+            return false;
+        };
+        let (prev_selected, prev_offset, _) = list_state.current_list_status();
+        let prev_branch = list_state.hovered_branch.clone();
+        let prev_tag = list_state.hovered_tag.clone();
+
+        let header_height = 4u16; // app header (3) + column header (1)
+        if row < header_height {
+            list_state.set_hovered_branch(None);
+            list_state.set_hovered_tag(None);
+            list_state.set_hovered_row(None);
+        } else {
+            let (selected, offset, height) = list_state.current_list_status();
+            let visible_row = (row - header_height) as usize;
+
+            if let Some(branch_name) = list_state.branch_at_position(col, row) {
+                list_state.set_hovered_branch(Some(branch_name));
+                list_state.set_hovered_tag(None);
+                list_state.set_hovered_row(Some(visible_row));
+            } else if let Some(tag_name) = list_state.tag_at_position(col, row) {
+                list_state.set_hovered_tag(Some(tag_name));
+                list_state.set_hovered_branch(None);
+                list_state.set_hovered_row(Some(visible_row));
+            } else {
+                list_state.set_hovered_branch(None);
+                list_state.set_hovered_tag(None);
+                list_state.set_hovered_row(None);
+                if visible_row < height {
+                    let hover_idx = offset + visible_row;
+                    let current_selected = offset + selected;
+                    if hover_idx != current_selected {
+                        list_state.select(hover_idx);
+                    }
+                }
+            }
+        }
+
+        let (new_selected, new_offset, _) = list_state.current_list_status();
+        let changed = prev_selected != new_selected
+            || prev_offset != new_offset
+            || list_state.hovered_branch != prev_branch
+            || list_state.hovered_tag != prev_tag;
+
+        // Mouse-hover changed the selected commit while search is
+        // applied, refresh the sticky "Match X of Y" footer so it
+        // tracks the cursor instead of trailing the last cycle.
+        if prev_selected != new_selected {
+            self.maybe_sync_search_status();
+        }
+
+        changed
+    }
+}

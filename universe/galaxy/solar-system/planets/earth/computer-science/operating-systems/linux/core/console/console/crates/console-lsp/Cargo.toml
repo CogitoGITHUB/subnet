@@ -1,0 +1,42 @@
+[package]
+authors.workspace = true
+description = "Nushell's integrated LSP server"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-lsp"
+name = "console-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+console-cli.workspace = true
+console-glob.workspace = true
+console-parser.workspace = true
+console-protocol.workspace = true
+console-utils.workspace = true
+console-experimental.workspace = true 
+
+crossbeam-channel = { workspace = true }
+fancy-regex = { workspace = true }
+lsp-server = { workspace = true }
+lsp-textdocument = { workspace = true }
+lsp-types = { workspace = true }
+memchr = { workspace = true }
+miette = { workspace = true }
+nucleo-matcher = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+console-cmd-lang = { workspace = true, features = ["os"] }
+console-command = { workspace = true, features = ["os"] }
+console-engine.workspace = true
+console-std.workspace = true
+console-test-support = { path = "../console-test-support" }
+
+assert-json-diff = "2.0"
+rstest = { workspace = true, default-features = false }
+
+[lints]
+workspace = true

@@ -1,0 +1,3 @@
+# Keep git-secrets secrets out of Cursor's indexing and Agent context.
+.git-secrets/
+*.cott.*

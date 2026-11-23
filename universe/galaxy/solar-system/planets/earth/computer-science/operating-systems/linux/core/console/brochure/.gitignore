@@ -1,0 +1,14 @@
+/target
+.cargo
+.ast-cache/
+.claude
+docs
+.idea
+TASKS.md
+RELEASING.md
+changelog/
+vault
+.worktrees/
+.superpowers/
+vhs/screenshots/
+__pycache__/

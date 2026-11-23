@@ -1,6 +1,0 @@
-test mod-nodes
-level 2
-module ../../FILE/runfile/model/nodes.rkt
-call (procedure? node-line)
-expect result equals #t
-expect seconds-under 20

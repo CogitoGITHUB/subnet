@@ -1,0 +1,51 @@
+[package]
+authors.workspace = true
+build = "build.rs"
+description = "Nushell's core language commands"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-cmd-lang"
+edition.workspace = true
+license.workspace = true
+name = "console-cmd-lang"
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-engine.workspace = true
+console-experimental.workspace = true
+console-parser.workspace = true
+console-protocol.workspace = true
+console-utils.workspace = true
+console-cmd-base.workspace = true
+
+itertools = { workspace = true }
+semver = { workspace = true }
+shadow-rs = { version = "2.0", default-features = false }
+
+[build-dependencies]
+shadow-rs = { version = "2.0", default-features = false, features = ["build"] }
+
+[dev-dependencies]
+console-test-support = { path = "../console-test-support" }
+
+quickcheck = { workspace = true }
+quickcheck_macros = { workspace = true }
+miette = { workspace = true }
+
+[features]
+default = ["os"]
+os = [
+  "console-engine/os",
+  "console-protocol/os",
+  "console-test-support/os",
+  "console-utils/os",
+]
+plugin = [
+  "console-protocol/plugin",
+  "os",
+]

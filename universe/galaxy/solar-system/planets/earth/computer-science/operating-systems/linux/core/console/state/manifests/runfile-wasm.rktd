@@ -1,0 +1,10 @@
+(spec
+  (format-version 2)
+  (name runfile-wasm)
+  (version "0.1.0")
+  (summary "the RUN runfile system as wasm")
+  (source (local "/root/home/shape/subnet/universe/galaxy/solar-system/planets/earth/computer-science/operating-systems/linux/core/console"))
+  (build (steps (run #:argv ("nice" "-n" "19" "cargo" "build" "--release" "-j" "2" "--target" "wasm32-unknown-unknown" "--target-dir" "runfile/target-wasm" "--manifest-path" "runfile/Cargo.toml"))))
+  (install (prefix (bin "runfile/target-wasm/wasm32-unknown-unknown/release/runfile.wasm" "bin/runfile.wasm")))
+  (license mit)
+  (homepage "https://example.invalid/"))

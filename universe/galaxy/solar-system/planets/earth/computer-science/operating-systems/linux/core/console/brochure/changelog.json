@@ -1,0 +1,202 @@
+[
+  {
+    "version": "0.3.0",
+    "date": "2026-04-29",
+    "summary": "This update introduces keybinding shortcuts and utility improvements across article viewing and feed editing.",
+    "highlights": [
+      "Use 'C' keybind to copy article links quickly.",
+      "Feed Editor now displays and allows editing of URLs.",
+      "Added toggle to control list wrap-around scrolling.",
+      "Fixed clipping issues in article title previews."
+    ]
+  },
+  {
+    "version": "0.3.1",
+    "date": "2026-04-30",
+    "summary": "This update introduces better visibility into content history and improves the user experience across category and saved views.",
+    "highlights": [
+      "New Changelog+About tab shows version history.",
+      "Added age column to article previews.",
+      "Improved category view footer with stats.",
+      "Better performance for saved and category content."
+    ]
+  },
+  {
+    "version": "0.3.2",
+    "date": "2026-04-30",
+    "summary": "Stability updates and quality-of-life improvements for a better user experience.",
+    "highlights": [
+      "Saved list now grows when footer is empty",
+      "Minor bug fixes and UI improvements"
+    ]
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-05-05",
+    "summary": "Introduces version checking, an \"All Feeds\" virtual entry, improved navigation controls, and various UI fixes and enhancements.",
+    "highlights": [
+      "Version check popup with release highlights",
+      "\"All Feeds\" virtual entry showing all articles",
+      "Arrow keys toggle boolean settings consistently",
+      "Minor bug fixes and UI improvements"
+    ]
+  },
+  {
+    "version": "0.5.0",
+    "date": "2026-05-07",
+    "summary": "Introducing a full theme editor with live customization and improved UI navigation features.",
+    "highlights": [
+      "Full theme editor for browsing, creating, and exporting themes",
+      "Scrollbars now show fractional position indicators for smoother navigation",
+      "Visible text cursor in all input fields with arrow key support"
+    ]
+  },
+  {
+    "version": "0.5.1",
+    "date": "2026-05-07",
+    "summary": "Improves feed refreshing, view population, article age indicators, and navigation limits in settings and editors.",
+    "highlights": [
+      "Refreshes all feeds when \"All Feeds\" is selected",
+      "Correctly populates \"All Feeds\" on startup and after fetch",
+      "Shows article age badges in All Feeds and categories",
+      "Stops scroll loop at top/bottom of Settings and Feed Editor"
+    ]
+  },
+  {
+    "version": "0.5.2",
+    "date": "2026-05-07",
+    "summary": "Improved UI responsiveness and readability in update popup and feed list.",
+    "highlights": [
+      "Scrolling in update popup now responds instantly",
+      "Feed list scrollbar accurately tracks position",
+      "Long bullet points wrap with hanging indent",
+      "Minor bug fixes and UI improvements"
+    ]
+  },
+  {
+    "version": "0.5.3",
+    "date": "2026-05-09",
+    "summary": "Improved text input consistency and introduced a high-visibility inverted block cursor across editors.",
+    "highlights": [
+      "Unified text input behavior for all editors",
+      "Added high-visibility inverted block cursor",
+      "Enhanced hex editor with validation and UI tweaks",
+      "Resolved editor cursor issues"
+    ]
+  },
+  {
+    "version": "0.6.0",
+    "date": "2026-05-11",
+    "summary": "Improved UI persistence, fixed crashes and freezes, enhanced feed handling and image display.",
+    "highlights": [
+      "Changelog entries can be collapsed/expanded persistently",
+      "Sidebar collapse state remembered between sessions",
+      "Settings items now show brief descriptions",
+      "Article images rendered inline in article content",
+      "Resolved crash with 2-day archive policy",
+      "Fixed UI freezes during batch feed fetching"
+    ]
+  },
+  {
+    "version": "0.7.0",
+    "date": "2026-05-26",
+    "summary": "This update brings 20 built-in themes including light mode, plus clipboard and stability improvements.",
+    "highlights": [
+      "Choose from 20 themes, now with light mode support",
+      "Press 'y' in feed list to copy feed URL",
+      "Fixed crash when navigating article list",
+      "Code blocks adapt to the selected theme",
+      "Minor bug fixes and UI improvements"
+    ]
+  },
+  {
+    "version": "0.7.1",
+    "date": "2026-05-31",
+    "summary": "This update adds skeleton animations during loading, refines the article preview panel, and upgrades the theme editor with live previews. Various fixes improve alignment and image persistence.",
+    "highlights": [
+      "Skeleton animation replaces spinners during loading",
+      "Article preview no longer duplicates description",
+      "Theme editor now live-previews themes",
+      "Minor bug fixes and UI improvements"
+    ]
+  },
+  {
+    "version": "0.8.0",
+    "date": "2026-05-31",
+    "summary": "This release introduces a distraction-free Zen reading mode, four new themes, Everforest contrast adjustments, and color accuracy fixes.",
+    "highlights": [
+      "Zen mode for distraction-free reading (press z)",
+      "Added Sepia, Gruvbox Light, Everforest Light, Powershell themes",
+      "Everforest themes now use soft contrast palette",
+      "Fixed color accuracy in Rose Pine, Catppuccin, Solarized"
+    ]
+  },
+  {
+    "version": "0.9.0",
+    "date": "2026-05-31",
+    "summary": "This release adds SVG inline rendering, improves feed fetching against bot protection, and enhances image clipping and error messaging.",
+    "highlights": [
+      "SVG images now render inline with PNG and JPEG.",
+      "Feed fetching mimics browser to evade bot protection.",
+      "Off-screen inline images now clip instead of disappearing.",
+      "Error indicators use descriptive text in sidebar and preview."
+    ]
+  },
+  {
+    "version": "0.10.0",
+    "date": "2026-08-17",
+    "summary": "Prebuilt binaries for every platform and more reliable feed fetching.",
+    "highlights": [
+      "Prebuilt binaries for Linux, macOS, and Windows",
+      "Failed feed fetches are retried automatically",
+      "Fewer sites block feed requests"
+    ]
+  },
+  {
+    "version": "0.11.0",
+    "date": "2026-10-19",
+    "summary": "FreshRSS sync, full mouse support, and a keybindings popup, plus a long list of fixes.",
+    "highlights": [
+      "Sync feeds and read state with FreshRSS",
+      "Click, scroll, drag, and open links with the mouse",
+      "Press ? to see every key for the current screen",
+      "Settings and feeds survive crashes during a save",
+      "Smoother scrolling and less disk writing"
+    ]
+  },
+  {
+    "version": "0.12.0",
+    "date": "2026-10-25",
+    "summary": "Nicer code blocks and tables in articles, and a faster way to install.",
+    "highlights": [
+      "Syntax-highlighted code blocks matching your theme",
+      "Tables drawn with borders and aligned columns",
+      "Install a prebuilt binary with cargo binstall",
+      "Fixes for nested lists, quotes, and code blocks"
+    ]
+  },
+  {
+    "version": "0.13.0",
+    "date": "2026-10-26",
+    "summary": "Full mouse support, notification cards, and a full-screen image viewer.",
+    "highlights": [
+      "Drag scrollbars and lists with the mouse",
+      "Notification cards with live refresh progress",
+      "Click an article image to view it full screen",
+      "Popups and dialogs work with the mouse",
+      "Text selection follows scrolling and copies fully"
+    ]
+  },
+  {
+    "version": "0.14.0",
+    "date": "2026-10-28",
+    "summary": "Keyboard link hints, a redesigned update popup, and safer full-article fetching.",
+    "highlights": [
+      "Press f to open links and images by keyboard",
+      "Press F to copy a link or image",
+      "Redesigned update popup with clearer release notes",
+      "PDF links no longer show garbage text",
+      "In-page links now open the article page"
+    ]
+  }
+]

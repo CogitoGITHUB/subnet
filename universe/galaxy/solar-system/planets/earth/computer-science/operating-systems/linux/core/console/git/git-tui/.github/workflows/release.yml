@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Least privilege: the GITHUB_TOKEN can only read the repository. The
+# `release` job raises this to `contents: write` to publish the release.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # macOS runners stash `rustup-init` under the name `cargo`
+          # in the bin cache. On restore that shadows the real cargo
+          # binary, so `cargo build` errors with "unexpected argument".
+          cache-bin: false
+      # See build.yml comment - `zig` itself isn't in taiki-e/install-
+      # action's manifest, so install via the dedicated setup-zig
+      # action; cargo-zigbuild then uses it as the cross linker.
+      - name: Install zig (Linux cross-compile only)
+        if: matrix.cross
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux cross-compile only)
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+      - name: Set release version
+        shell: bash
+        run: echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> ${GITHUB_ENV}
+      - name: Archive
+        if: runner.os != 'Windows'
+        run: tar -czf git-tui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release git-tui
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/git-tui.exe -DestinationPath git-tui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.zip
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            git-tui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
+            git-tui-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.zip
+          if-no-files-found: error
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout (for tag message extraction)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Extract tag message
+        id: tag_msg
+        run: |
+          # Annotated tags carry a message (git tag -a -m "...").
+          # Extract it and pass as the release body so the author's
+          # notes appear at the top, followed by the auto-generated
+          # commit list.
+          msg="$(git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" | head -500)"
+          # GitHub Actions multiline output
+          {
+            echo "body<<TAGMSG_EOF"
+            echo "$msg"
+            echo "TAGMSG_EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Download artifact
+        uses: actions/download-artifact@v8
+        with:
+          path: releases
+          pattern: release-*
+          merge-multiple: true
+      - name: Checksum
+        # Bare file names, so `sha256sum -c checksum.txt` works next to
+        # the downloaded archives and install.sh can match them.
+        run: cd releases && sha256sum *.tar.gz *.zip > checksum.txt
+      - name: Create Release
+        uses: softprops/action-gh-release@v3.0.4
+        with:
+          draft: false
+          body: ${{ steps.tag_msg.outputs.body }}
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            releases/*
+
+  publish-crate:
+    # Push the source crate to crates.io ONLY after the GitHub Release
+    # has been published successfully. Gating on `release` (which itself
+    # needs `build`) means a failed binary build or release-creation
+    # step keeps the crate off crates.io - so users never end up with
+    # a `cargo install git-tui` version that has no matching
+    # downloadable binary, and the install.sh one-liner never resolves
+    # a tag whose Release doesn't exist yet.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify Cargo.toml version matches the tag
+        # Refuses to publish when the bump commit was forgotten - `cargo
+        # publish` would still succeed silently with the old version.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo_v="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if [ "$tag" != "$cargo_v" ]; then
+            echo "::error::tag $tag does not match Cargo.toml version $cargo_v"
+            exit 1
+          fi
+      - name: Publish to crates.io
+        env:
+          # Set CARGO_REGISTRY_TOKEN as a repository secret in
+          # Settings → Secrets and variables → Actions.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked

@@ -1,0 +1,12 @@
+see;run see FILE [--plain] [--contracts];View a page, formatted. Add --contracts for its contract panel. Opens the page picker when no file is given.
+open;run open FILE;Open a page in your editor (CONSOLE_EDITOR, else EDITOR).
+check;run check FILE;Check a page and list errors with their line numbers. Exit 0 means clean.
+render;run render FILE;Plain text render of a page.
+parse;run parse FILE;Print the parse tree, including error lines.
+roundtrip;run roundtrip FILE;Check that the page prints back byte for byte.
+pick;run pick [FOLDER];Pick a page with finder and print its path.
+update;run update;Rebuild the binary and regenerate the type pages if local files changed.
+list;run list [--plain];List the blocks and file types. With finder: pick blocks or types, then a list with details; new-block and new-type help you make new ones. --plain prints the two tables.
+gate;run gate;Run the light gate: all checks of the code itself.
+new;run new TYPE FILE;Create a page from the starter of a type, then check it. Asks for type and file.
+newtype;run newtype NAME;Write a module for a new file type, then run run update. Asks for the name.

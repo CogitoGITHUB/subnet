@@ -1,0 +1,66 @@
+[package]
+authors.workspace = true
+description = "CLI-related functionality for Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-cli"
+edition.workspace = true
+license.workspace = true
+name = "console-cli"
+rust-version.workspace = true
+version.workspace = true
+autotests = false
+
+[lib]
+bench = false
+harness = false
+
+[dev-dependencies]
+console-cmd-lang = { workspace = true, features = ["os"] }
+console-command = { workspace = true, features = ["os"] }
+console-std.workspace = true
+console-test-support = { path = "../console-test-support", features = ["os"] }
+rstest = { workspace = true, default-features = false }
+tempfile = { workspace = true }
+
+[dependencies]
+console-cmd-base.workspace = true
+console-command = { workspace = true, features = ["os"] }
+console-engine = { workspace = true, features = ["os"] }
+console-glob.workspace = true
+console-path.workspace = true
+console-parser.workspace = true
+console-plugin-engine = { workspace = true, optional = true }
+console-protocol = { workspace = true, features = ["os"] }
+console-config.workspace = true
+console-utils.workspace = true
+console-color-config.workspace = true
+console-experimental.workspace = true
+nu-ansi-term.workspace = true
+shell-jump = { package = "directory-jump", path = "../../../directory-jump" }
+reedline = { workspace = true, features = ["bashisms"] }
+
+chrono = { default-features = false, features = ["std"], workspace = true }
+crossterm = { workspace = true }
+fancy-regex = { workspace = true }
+is_executable = { workspace = true }
+log = { workspace = true }
+lru = { workspace = true }
+lscolors = { workspace = true, default-features = false, features = ["nu-ansi-term"] }
+miette = { workspace = true, features = ["fancy-no-backtrace"] }
+nucleo-matcher = { workspace = true }
+parking_lot = { workspace = true }
+percent-encoding = { workspace = true }
+sysinfo = { workspace = true }
+strum = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+which = { workspace = true }
+
+[features]
+plugin = ["console-plugin-engine"]
+system-clipboard = ["reedline/system_clipboard"]
+sqlite = ["reedline/sqlite", "console-protocol/sqlite", "console-command/sqlite"]
+
+[lints]
+workspace = true

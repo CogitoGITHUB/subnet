@@ -1,0 +1,62 @@
+- id: git-secrets-status
+  name: git-secrets-status
+  description: check if the locally modified secrets are encrypted (timestamp bases)
+  entry: aiusec status --skip-decryption --fail
+  language: system
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+  always_run: true
+
+- id: git-secrets-diff
+  name: git-secrets-diff
+  description: check with diff if the locally modified secrets are encrypted (timestamp based)
+  entry: aiusec diff --skip-decryption --fail
+  language: system
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+  always_run: true
+
+- id: git-secrets-sync-encrypt
+  name: git-secrets-sync-encrypt
+  description: encrypt the locally modified secrets (timestamp based)
+  entry: aiusec sync --skip-decryption
+  language: system
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+  always_run: true
+
+- id: git-secrets-encrypt
+  name: git-secrets-encrypt
+  description: encrypt the locally modified secrets (content based)
+  entry: aiusec encrypt
+  language: system
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+  always_run: true
+
+- id: git-secrets-verify
+  name: git-secrets-verify
+  description: verify the upstream modified secrets (content based)
+  entry: aiusec verify
+  language: system
+  pass_filenames: false
+  stages: [post-checkout, post-merge, post-rewrite]
+  always_run: true
+
+- id: git-secrets-sync-decrypt
+  name: git-secrets-sync-decrypt
+  description: decrypt the upstream modified secrets (timestamp based)
+  entry: aiusec sync --skip-encryption
+  language: system
+  pass_filenames: false
+  stages: [post-checkout, post-merge, post-rewrite]
+  always_run: true
+
+- id: git-secrets-decrypt
+  name: git-secrets-decrypt
+  description: decrypt the upstream modified secrets (content based)
+  entry: aiusec decrypt
+  language: system
+  pass_filenames: false
+  stages: [post-checkout, post-merge, post-rewrite]
+  always_run: true

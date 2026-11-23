@@ -1,6 +1,0 @@
-test mod-addressing
-level 2
-module ../../FILE/runfile/model/addressing.rkt
-call (procedure? address-of)
-expect result equals #t
-expect seconds-under 20

@@ -1,0 +1,2768 @@
+//! `ssh-manager` — a TUI SSH host manager.
+//!
+//! The binary runs in one of three modes:
+//!  - askpass: when invoked by `ssh` via `SSH_ASKPASS` (detected by the `SSH_MANAGER_ASKPASS` env var);
+//!  - completion: when invoked by a shell's dynamic-completion hook (the `COMPLETE` env var);
+//!  - normal: the interactive TUI (default) or a subcommand (`list`, `add`, `import`, …).
+
+mod app;
+mod askpass;
+mod config;
+mod display;
+mod doctor;
+mod export;
+mod first_connect;
+mod forwards;
+mod import;
+mod model;
+mod paths;
+mod run_style;
+mod search;
+mod secrets;
+mod ssh;
+mod sshcmd;
+mod state;
+mod store;
+mod tailscale;
+#[cfg(test)]
+mod testsupport;
+mod transfer;
+mod ui;
+mod vault;
+
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use anyhow::{Context, Result};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::CompleteEnv;
+use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde::Serialize;
+use zeroize::Zeroizing;
+
+use crate::config::Config;
+use crate::model::{AuthMethod, Host, Site};
+use crate::paths::{CONFIG_ENV, Paths};
+use crate::state::FrecencyState;
+
+/// Note the absence of `args_conflicts_with_subcommands`: it counts the **global** flags as
+/// top-level args, so it rejected `ssh-manager --config FILE <subcommand>` outright — and, worse,
+/// read `ssh-manager --config FILE list` as "connect to a host named `list`". The one combination it
+/// was really guarding against is caught explicitly by [`reject_host_with_subcommand`].
+#[derive(Parser)]
+#[command(name = "ssh-manager", version, about = "A TUI SSH host manager")]
+struct Cli {
+    /// Use a specific config file (default: ~/.config/ssh-manager/config.toml).
+    #[arg(long, global = true, value_name = "FILE")]
+    config: Option<PathBuf>,
+    /// Append transfer-screen diagnostics (the ssh/sftp commands + their errors; no secrets)
+    /// to FILE. Also settable via $SSH_MANAGER_TRANSFER_LOG.
+    #[arg(long, global = true, value_name = "FILE")]
+    transfer_log: Option<PathBuf>,
+    /// Connect directly to a saved host by name (skips the TUI), or `-` to reconnect to the
+    /// most recently used host. With no host and no subcommand, ssh-manager launches the TUI.
+    #[arg(value_name = "HOST", add = ArgValueCandidates::new(host_name_candidates))]
+    host: Option<String>,
+    /// Ask for a terminal when running a remote command (`ssh -t`). Only meaningful with
+    /// `-- COMMAND`; needed for anything full-screen, like `ssh-manager web -t -- htop`.
+    #[arg(short = 't', long, requires = "remote_command")]
+    tty: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+    /// Run this command on the host instead of opening a shell. Must come after `--`, e.g.
+    /// `ssh-manager web-01 -- systemctl status nginx`. The exit status is the command's own.
+    #[arg(last = true, value_name = "COMMAND")]
+    remote_command: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// List saved hosts (sorted by frecency). Optional QUERY filters by fuzzy text and/or
+    /// `tag:NAME` tokens — the same syntax as the TUI search box.
+    List {
+        #[arg(value_name = "QUERY", num_args = 0..)]
+        query: Vec<String>,
+        /// Emit machine-readable JSON (host fields + the generated ssh command) instead of the
+        /// human table. Always valid JSON, even when the result is empty.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a host. With no arguments, opens the TUI add form; with arguments, adds it
+    /// non-interactively (NAME and --hostname are required).
+    Add(AddArgs),
+    /// Import hosts from ~/.ssh/config (read-only), or from your Tailscale tailnet.
+    Import {
+        /// Show what would be imported without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Import your Tailscale tailnet instead of ~/.ssh/config: runs your own
+        /// `tailscale status --json` and adds every eligible peer. Set $SSH_MANAGER_TAILSCALE_BIN
+        /// if the CLI isn't on your PATH.
+        #[arg(long)]
+        tailscale: bool,
+    },
+    /// Export hosts as an ssh_config fragment, written next to ssh-manager's config. Add one
+    /// `Include` line to ~/.ssh/config yourself (ssh-manager never edits it) and plain ssh/scp/sftp
+    /// resolve these hosts by name. Once the file exists, it refreshes on every hosts change.
+    Export {
+        /// Print the fragment to stdout instead of writing the file.
+        #[arg(long)]
+        stdout: bool,
+    },
+    /// Store a password (read from stdin) for a host, by name or id, or for a shared
+    /// credential with --credential. Naming a host that uses a shared credential sets that
+    /// credential, for every host on it.
+    SetPassword {
+        /// Host name or id.
+        #[arg(add = ArgValueCandidates::new(host_name_candidates))]
+        host: Option<String>,
+        /// Set the shared credential with this name instead of one host's own secret.
+        #[arg(long, value_name = "NAME", conflicts_with = "host")]
+        credential: Option<String>,
+    },
+    /// Print the generated ssh command for a host without connecting.
+    #[command(name = "print-command")]
+    Print {
+        /// Host name or id.
+        #[arg(add = ArgValueCandidates::new(host_name_candidates))]
+        host: String,
+    },
+    /// Open the picker, print the chosen host's name, and exit without connecting. Draws in the
+    /// rows under your prompt and leaves it where it was, so it suits a shell key binding. The
+    /// list goes to stderr, so `$(ssh-manager pick)` captures the name and nothing else. Mark several
+    /// rows (^s) to print one name per line. Exits 1 if you quit without choosing.
+    Pick {
+        /// Start with the search box already filled (same syntax as `ssh-manager list`).
+        #[arg(value_name = "QUERY", num_args = 0.., add = ArgValueCandidates::new(host_name_candidates))]
+        query: Vec<String>,
+        /// Rows to draw under the prompt (default: the `pick_height` config key, else 15).
+        /// Clamped to the terminal, which always keeps one row for your prompt.
+        #[arg(long, value_name = "ROWS", conflicts_with = "full_screen")]
+        height: Option<u16>,
+        /// Take the whole terminal instead, the way the TUI does.
+        #[arg(long)]
+        full_screen: bool,
+    },
+    /// Manage sites (groups with optional shared SSH defaults): list them, or add one.
+    Sites {
+        #[command(subcommand)]
+        action: Option<SitesAction>,
+        /// Emit JSON instead of the human table (same as `ssh-manager sites list --json`).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Manage shared credentials (one stored secret, many hosts): list, define, remove, and
+    /// bind hosts to one. The secret itself is set with `ssh-manager set-password --credential`.
+    Credentials {
+        #[command(subcommand)]
+        action: Option<CredentialsAction>,
+        /// Emit JSON instead of the human table (same as `ssh-manager credentials list --json`).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check the environment and the host database for the things that break connections:
+    /// the OpenSSH version, the secret backend, dangling site references, a stale export, a
+    /// missing ssh-agent. Local and read-only — it never contacts a host. Exits 1 if any
+    /// check failed (warnings don't).
+    Doctor,
+    /// Print static shell completions to stdout (for packaging). For host-name completion,
+    /// set up dynamic completions instead — see the README.
+    Completions {
+        /// Shell: bash, zsh, fish, elvish, or powershell.
+        shell: clap_complete::Shell,
+    },
+    /// Print the man page (roff) to stdout.
+    Man,
+}
+
+impl Command {
+    /// The subcommand's own name, for error messages. Kept next to the variants so a new
+    /// subcommand can't quietly go unnamed.
+    fn name(&self) -> &'static str {
+        match self {
+            Command::List { .. } => "list",
+            Command::Add(_) => "add",
+            Command::Import { .. } => "import",
+            Command::Export { .. } => "export",
+            Command::SetPassword { .. } => "set-password",
+            Command::Print { .. } => "print-command",
+            Command::Pick { .. } => "pick",
+            Command::Sites { .. } => "sites",
+            Command::Credentials { .. } => "credentials",
+            Command::Doctor => "doctor",
+            Command::Completions { .. } => "completions",
+            Command::Man => "man",
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum SitesAction {
+    /// List defined sites (the default action).
+    List {
+        /// Emit JSON instead of the human table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Define a new site. Settings are optional (a bare site is pure grouping); edit later in
+    /// the TUI with F3.
+    Add {
+        /// Site name (must be unique).
+        name: String,
+        /// Default login user for member hosts.
+        #[arg(short = 'u', long)]
+        user: Option<String>,
+        /// Default SSH port for member hosts.
+        #[arg(short = 'p', long)]
+        port: Option<u16>,
+        /// Default ProxyJump (bastion) — repeatable or comma-separated.
+        #[arg(short = 'J', long = "jump", value_name = "HOST", value_delimiter = ',')]
+        jump_hosts: Vec<String>,
+        /// Default identity file(s) for key-auth members — repeatable.
+        #[arg(short = 'i', long = "identity", value_name = "PATH")]
+        identity_files: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CredentialsAction {
+    /// List defined credentials, how many hosts use each, and whether a secret is stored
+    /// (the default action).
+    List {
+        /// Emit JSON instead of the human table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Define a credential, optionally with its secret, so one call per group is enough to
+    /// script a rollout.
+    Add {
+        /// Credential name: letters, digits, '-', '_' and '.'.
+        name: String,
+        /// What it is for, shown in listings. Never the secret.
+        #[arg(long)]
+        note: Option<String>,
+        /// Read the secret from stdin and store it, keeping it out of argv and shell history.
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// Remove a credential's definition. Refuses while hosts still use it unless --force,
+    /// which unbinds them too. The stored secret is deleted either way.
+    Rm {
+        /// Credential name.
+        name: String,
+        /// Unbind every host using it, then remove it.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Point one or more hosts at a credential, so they all authenticate from its one secret.
+    Bind {
+        /// Credential name.
+        #[arg(add = ArgValueCandidates::new(credential_name_candidates))]
+        name: String,
+        /// Host names or ids.
+        #[arg(required = true, add = ArgValueCandidates::new(host_name_candidates))]
+        hosts: Vec<String>,
+    },
+    /// Give hosts their own secret again (the credential itself is left alone).
+    Unbind {
+        /// Host names or ids.
+        #[arg(required = true, add = ArgValueCandidates::new(host_name_candidates))]
+        hosts: Vec<String>,
+    },
+}
+
+/// Flags for non-interactive `ssh-manager add`. All optional, so bare `ssh-manager add` opens the TUI.
+#[derive(Args, Debug, Default)]
+struct AddArgs {
+    /// Host alias to search and connect by. Required for non-interactive add.
+    name: Option<String>,
+    /// IP address or DNS name. Required for non-interactive add.
+    #[arg(short = 'H', long)]
+    hostname: Option<String>,
+    /// Login user (defaults to your $USER at connect time).
+    #[arg(short = 'u', long)]
+    user: Option<String>,
+    /// SSH port (default 22).
+    #[arg(short = 'p', long)]
+    port: Option<u16>,
+    /// Auth method: agent (default), key, or password. Inferred as `key` when --identity is
+    /// given, or `password` when --password-stdin is given.
+    #[arg(short = 'a', long, value_enum)]
+    auth: Option<AuthArg>,
+    /// Identity file for key auth (repeatable). Implies `--auth key`.
+    #[arg(short = 'i', long = "identity", value_name = "PATH")]
+    identity_files: Vec<String>,
+    /// ProxyJump host (repeatable or comma-separated). Key/agent auth only in v1.
+    #[arg(short = 'J', long = "jump", value_name = "HOST", value_delimiter = ',')]
+    jump_hosts: Vec<String>,
+    /// Tag for grouping/filtering (repeatable or comma-separated).
+    #[arg(short = 't', long = "tag", value_name = "TAG", value_delimiter = ',')]
+    tags: Vec<String>,
+    /// Site to assign (groups the host + may supply inherited SSH defaults). See `ssh-manager sites`.
+    #[arg(short = 's', long, value_name = "NAME", add = ArgValueCandidates::new(site_name_candidates))]
+    site: Option<String>,
+    /// Read this host's secret from a shared credential instead of keeping its own, by name.
+    /// The credential need not exist yet; `ssh-manager credentials` lists them. With
+    /// --password-stdin, the secret is stored under the credential, for every host on it.
+    #[arg(short = 'c', long, value_name = "NAME", add = ArgValueCandidates::new(credential_name_candidates))]
+    credential: Option<String>,
+    /// Extra raw ssh flags, appended verbatim (e.g. "-o BatchMode=yes"). Quote the whole value;
+    /// hyphen-leading values are allowed here so the flags pass through.
+    #[arg(long = "extra", value_name = "ARGS", allow_hyphen_values = true)]
+    extra_args: Option<String>,
+    /// Read a password / key passphrase from stdin and store it (OS keyring or age vault),
+    /// keeping the secret out of argv and shell history. Implies `--auth password`.
+    #[arg(long)]
+    password_stdin: bool,
+    /// The host's login needs an interactive verification code (2FA): connect prompts for it.
+    #[arg(long = "2fa")]
+    requires_2fa: bool,
+    /// Build the host from a working ssh command line: one quoted string, or nothing (or `-`)
+    /// to read it from stdin. Opens the add form filled in; add --quiet to save it without the
+    /// form. Put NAME before this flag. The command line already supplies the hostname, user,
+    /// port, auth, keys, jump hosts and extra args, so those flags can't be used with it.
+    #[arg(
+        long = "from-ssh",
+        value_name = "CMD",
+        num_args = 0..=1,
+        conflicts_with_all = ["hostname", "user", "port", "auth", "identity_files", "jump_hosts", "extra_args"]
+    )]
+    from_ssh: Option<Option<String>>,
+    /// With --from-ssh: add the host without opening the form.
+    #[arg(short = 'q', long)]
+    quiet: bool,
+}
+
+/// Where `ssh-manager add` goes, given its flags.
+#[derive(Debug, PartialEq, Eq)]
+enum AddRoute {
+    /// Bare `ssh-manager add`: the empty form.
+    Form,
+    /// Flags: add non-interactively.
+    Flags,
+    /// `--from-ssh`: the filled-in form, or with `--quiet` a non-interactive add.
+    FromSsh,
+}
+
+/// CLI spelling of the auth method, kept separate from `model::AuthMethod` so the model stays
+/// free of a clap dependency.
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum AuthArg {
+    Agent,
+    Key,
+    Password,
+}
+
+impl From<AuthArg> for AuthMethod {
+    fn from(a: AuthArg) -> Self {
+        match a {
+            AuthArg::Agent => AuthMethod::Agent,
+            AuthArg::Key => AuthMethod::Key,
+            AuthArg::Password => AuthMethod::Password,
+        }
+    }
+}
+
+impl AddArgs {
+    /// True when at least one field was supplied (→ non-interactive add). Bare `ssh-manager add`
+    /// supplies nothing and opens the TUI form instead.
+    fn has_args(&self) -> bool {
+        self.name.is_some()
+            || self.hostname.is_some()
+            || self.user.is_some()
+            || self.port.is_some()
+            || self.auth.is_some()
+            || !self.identity_files.is_empty()
+            || !self.jump_hosts.is_empty()
+            || !self.tags.is_empty()
+            || self.site.is_some()
+            || self.extra_args.is_some()
+            || self.password_stdin
+            || self.requires_2fa
+            || self.from_ssh.is_some()
+            || self.quiet
+    }
+
+    fn route(&self) -> Result<AddRoute> {
+        if self.from_ssh.is_some() {
+            return Ok(AddRoute::FromSsh);
+        }
+        if self.quiet {
+            anyhow::bail!("--quiet only applies to --from-ssh");
+        }
+        Ok(if self.has_args() {
+            AddRoute::Flags
+        } else {
+            AddRoute::Form
+        })
+    }
+
+    /// Effective auth method, with inference from --identity / --password-stdin.
+    fn resolved_auth(&self) -> AuthMethod {
+        match self.auth {
+            Some(a) => a.into(),
+            None if !self.identity_files.is_empty() => AuthMethod::Key,
+            None if self.password_stdin => AuthMethod::Password,
+            None => AuthMethod::Agent,
+        }
+    }
+
+    /// Build a `Host` from the args (no IO). Errors if NAME or --hostname is missing.
+    fn into_host(self) -> Result<Host> {
+        let auth = self.resolved_auth();
+        let name = self.name.context(
+            "non-interactive `add` needs a NAME (run `ssh-manager add` with no arguments for the form)",
+        )?;
+        let hostname = self.hostname.context(
+            "non-interactive `add` needs --hostname (run `ssh-manager add` with no arguments for the form)",
+        )?;
+        let mut host = Host::new(name, hostname);
+        host.user = self.user;
+        host.port = self.port;
+        host.auth = auth;
+        host.identity_files = self.identity_files;
+        host.jump_hosts = self.jump_hosts;
+        host.tags = self.tags;
+        host.site = self.site;
+        // Validated here so a typo fails before anything is written, and lower-cased because
+        // the name becomes a key in the secret store.
+        host.credential = self
+            .credential
+            .map(|name| model::validate_credential_name(&name))
+            .transpose()
+            .map_err(|e| anyhow::anyhow!(e))?;
+        host.extra_args = self.extra_args;
+        host.requires_2fa = self.requires_2fa;
+        Ok(host)
+    }
+}
+
+/// The process entry point exists only to print the error safely.
+///
+/// Not `fn main() -> Result<()>`: the runtime's own printer writes the `anyhow` chain to the
+/// terminal unfiltered, and that chain quotes untrusted text — a `toml` parse error repeats
+/// the offending line of `hosts.toml` verbatim, escape sequences and all. Every plain-CLI
+/// command shares this one exit, so sanitizing here covers all of them (L-02).
+pub fn run_from(argv: Vec<std::ffi::OsString>) -> ExitCode {
+    match run(argv) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {}", display::error_line(&format!("{e:#}")));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// ssh calls the binary as askpass helper with the prompt as argv 1.
+pub fn askpass_entry() -> Option<ExitCode> {
+    std::env::var_os("SSH_MANAGER_ASKPASS")?;
+    let prompt = std::env::args().nth(1).unwrap_or_default();
+    std::process::exit(askpass::run(&prompt));
+}
+
+fn run(argv: Vec<std::ffi::OsString>) -> Result<()> {
+    // Dynamic shell completion: if the shell's completion hook invoked us (COMPLETE env var),
+    // emit candidates and exit. A no-op on a normal run.
+    CompleteEnv::with_factory(Cli::command).complete();
+
+    let cli = match Cli::try_parse_from(argv) {
+        Ok(cli) => cli,
+        Err(e) => {
+            let note = conflict_note(&e);
+            let _ = e.print();
+            if let Some(note) = note {
+                eprintln!("note: {note}");
+            }
+            std::process::exit(e.exit_code());
+        }
+    };
+    reject_host_with_subcommand(cli.host.as_deref(), cli.command.as_ref())?;
+    // `--config` is plumbed to all paths via the env var so subcommands + Paths resolution see
+    // it uniformly. Set before any Paths::resolve().
+    if let Some(path) = &cli.config {
+        // SAFETY: set once at startup, before any threads are spawned.
+        unsafe {
+            std::env::set_var(CONFIG_ENV, path);
+        }
+    }
+    if let Some(path) = &cli.transfer_log {
+        // SAFETY: set once at startup, before any threads are spawned.
+        unsafe {
+            std::env::set_var(transfer::LOG_ENV, path);
+        }
+    }
+    match cli.command {
+        Some(Command::List { query, json }) => cmd_list(&query.join(" "), json),
+        Some(Command::Add(args)) => match args.route()? {
+            AddRoute::Form => app::run_add(),
+            AddRoute::Flags => cmd_add(args),
+            AddRoute::FromSsh => cmd_add_from_ssh(args),
+        },
+        Some(Command::Import { dry_run, tailscale }) => cmd_import(dry_run, tailscale),
+        Some(Command::Export { stdout }) => cmd_export(stdout),
+        Some(Command::SetPassword { host, credential }) => {
+            cmd_set_password(host.as_deref(), credential.as_deref())
+        }
+        Some(Command::Print { host }) => cmd_print_command(&host),
+        Some(Command::Pick {
+            query,
+            height,
+            full_screen,
+        }) => app::run_pick(&query.join(" "), height, full_screen),
+        Some(Command::Sites { action, json }) => cmd_sites(action, json),
+        Some(Command::Credentials { action, json }) => cmd_credentials(action, json),
+        Some(Command::Doctor) => cmd_doctor(),
+        Some(Command::Completions { shell }) => {
+            clap_complete::generate(shell, &mut Cli::command(), "ssh-manager", &mut std::io::stdout());
+            Ok(())
+        }
+        Some(Command::Man) => clap_mangen::Man::new(Cli::command())
+            .render(&mut std::io::stdout())
+            .context("rendering man page"),
+        // No subcommand: `-` reconnects to the last host, a bare name connects directly,
+        // nothing launches the TUI.
+        None => {
+            let remote = ssh::RemoteCommand {
+                argv: cli.remote_command,
+                tty: cli.tty,
+            };
+            match cli.host.as_deref() {
+                Some("-") => cmd_connect_last(&remote),
+                Some(name) => cmd_connect(name, &remote),
+                None if !remote.is_empty() => anyhow::bail!(
+                    "name a host before `--`, e.g. `ssh-manager web-01 -- {}`",
+                    display::sanitize(&remote.argv.join(" "))
+                ),
+                None => app::run(),
+            }
+        }
+    }
+}
+
+/// The extra line for a clap conflict with `--from-ssh`. clap names the two flags but not why
+/// they can't go together.
+fn conflict_note(e: &clap::Error) -> Option<&'static str> {
+    (e.kind() == clap::error::ErrorKind::ArgumentConflict && e.to_string().contains("--from-ssh"))
+        .then_some(
+            "the ssh command line already supplies the hostname, user, port, auth, keys, jump \
+             hosts and extra args",
+        )
+}
+
+/// Reject `ssh-manager <HOST> <subcommand>`.
+///
+/// The bare positional means "connect to this host", so pairing it with a subcommand is always a
+/// mistake — and would be a *silent* one, since dispatch matches the subcommand first and the
+/// host would simply be dropped. This is the only combination the old blanket
+/// `args_conflicts_with_subcommands` was really guarding, and catching it here means the global
+/// `--config` / `--transfer-log` flags work on either side of a subcommand, as documented.
+fn reject_host_with_subcommand(host: Option<&str>, command: Option<&Command>) -> Result<()> {
+    let (Some(host), Some(command)) = (host, command) else {
+        return Ok(());
+    };
+    let sub = command.name();
+    anyhow::bail!(
+        "'{host}' is read as a host name, but '{sub}' is a subcommand — run one or the other \
+         (`ssh-manager {host}` connects to it; `ssh-manager {sub} …` takes no host in front)"
+    )
+}
+
+/// `ssh-manager import` — from `~/.ssh/config` by default, or from the user's Tailscale tailnet
+/// with `--tailscale`. Both sources are read-only and both are **add-only** toward
+/// `hosts.toml`: a re-run converges to "0 added".
+fn cmd_import(dry_run: bool, tailscale: bool) -> Result<()> {
+    let result = if tailscale {
+        let result = tailscale::import_tailnet()?;
+        println!(
+            "Parsed {} host(s) from your Tailscale tailnet",
+            result.hosts.len()
+        );
+        result
+    } else {
+        let path = import::default_config_path().context("HOME is not set")?;
+        if !path.exists() {
+            anyhow::bail!(
+                "no ssh config at {} — nothing to import; add hosts with `ssh-manager add` instead",
+                path.display()
+            );
+        }
+        let result = import::parse_file(&path)?;
+        println!(
+            "Parsed {} host(s) from {}",
+            result.hosts.len(),
+            path.display()
+        );
+        result
+    };
+    apply_import(result, dry_run)
+}
+
+/// The shared tail of every import mode: report warnings, skip names that already exist
+/// (case-insensitively — never update or delete one), create any site the parsed hosts
+/// reference, persist, and refresh the exported ssh_config fragment.
+fn apply_import(result: import::ImportResult, dry_run: bool) -> Result<()> {
+    for w in &result.warnings {
+        println!("  warning: {}", display::sanitize(w));
+    }
+
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+    let mut to_add = import::new_hosts(&result.hosts, &file.hosts)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let duplicates = result.hosts.len() - to_add.len();
+
+    if to_add.is_empty() {
+        if duplicates == 0 {
+            println!("Nothing to import.");
+        } else {
+            println!("0 added — {duplicates} name(s) already exist in ssh-manager.");
+        }
+        return Ok(());
+    }
+    let new_sites = import::missing_sites(&mut to_add, &file.sites);
+
+    // Preview the endpoints as they will read once written: against the sites already on file
+    // plus the ones this import is about to create (a Tailscale tailnet site, say).
+    let preview_sites: Vec<Site> = file.sites.iter().chain(new_sites.iter()).cloned().collect();
+    println!("{} new host(s):", to_add.len());
+    for h in &to_add {
+        println!(
+            "  {:<20} {}",
+            display::sanitize(&h.name),
+            display::sanitize(&h.endpoint_in(&preview_sites))
+        );
+    }
+    for s in &new_sites {
+        println!("  + site '{}'", display::sanitize(&s.name));
+    }
+    if dry_run {
+        println!("(dry run — nothing written)");
+        return Ok(());
+    }
+    let added = to_add.len();
+    file.sites.extend(new_sites);
+    file.hosts.extend(to_add);
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+    warn_export_refresh(export::refresh_if_exported(&paths, &file));
+    let skipped = match duplicates {
+        0 => String::new(),
+        n => format!(" ({n} skipped as duplicates)"),
+    };
+    println!(
+        "Imported {added} host(s) into {}{skipped}",
+        hosts_path.display()
+    );
+    Ok(())
+}
+
+/// Export the host database as an ssh_config fragment (the reverse of `import`, into our own
+/// file — never `~/.ssh/config`).
+fn cmd_export(stdout: bool) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    let path = paths.ssh_config_file();
+    let display = path.display().to_string();
+
+    if stdout {
+        print!("{}", export::render(&file, &display));
+        return Ok(());
+    }
+
+    export::write(&paths, &file)?;
+    let skipped = export::unexportable_names(&file);
+    println!(
+        "Exported {} host(s) to {}",
+        file.hosts.len() - skipped.len(),
+        display
+    );
+    for name in &skipped {
+        println!(
+            "  skipped {:?} — the name can't be an ssh_config Host pattern",
+            display::sanitize(name)
+        );
+    }
+    if file.hosts.is_empty() {
+        println!("(no hosts yet — `ssh-manager add` or `ssh-manager import` first)");
+    }
+
+    // Read-only peek at ~/.ssh/config, only to drop the hint once it's already wired up.
+    let mut candidates = vec![display.clone()];
+    if let Ok(home) = std::env::var("HOME")
+        && let Some(rest) = display.strip_prefix(&home)
+    {
+        candidates.push(format!("~{rest}"));
+    }
+    let included = std::env::var("HOME")
+        .ok()
+        .map(|h| PathBuf::from(h).join(".ssh").join("config"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .is_some_and(|text| export::already_included(&text, &candidates));
+    if included {
+        println!("Your ~/.ssh/config already includes it — ssh/scp/sftp see these hosts.");
+    } else {
+        println!("To use it, add this line to your ~/.ssh/config (ssh-manager never edits that file):");
+        println!("  Include {display}");
+    }
+    println!("The file now refreshes automatically whenever your hosts change.");
+    Ok(())
+}
+
+/// Print an advisory warning when refreshing the exported fragment fails. Never fatal: the
+/// fragment is derived data and must not block whatever just changed the hosts.
+fn warn_export_refresh(outcome: Option<Result<()>>) {
+    if let Some(Err(e)) = outcome {
+        eprintln!("ssh-manager: warning: could not refresh the ssh_config export: {e:#}");
+    }
+}
+
+/// `ssh-manager set-password <host>` or `ssh-manager set-password --credential <name>`: read one line from
+/// stdin and store it. The host form writes whichever key the host resolves to, so a host on a
+/// shared credential updates that credential (and says how many hosts it serves).
+fn cmd_set_password(host_ref: Option<&str>, credential: Option<&str>) -> Result<()> {
+    use std::io::BufRead;
+    let paths = Paths::resolve()?;
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+
+    // What is being set, and what to call it in the messages.
+    let (key, subject, shared_with) = match (host_ref, credential) {
+        (Some(host_ref), _) => {
+            let host = file
+                .hosts
+                .iter()
+                .find(|h| h.id == host_ref || h.name == host_ref)
+                .with_context(|| {
+                    format!(
+                        "no host with name or id '{host_ref}' — run `ssh-manager list` to see your \
+                         hosts"
+                    )
+                })?;
+            let shared = host
+                .credential
+                .as_ref()
+                .map(|name| (name.clone(), file.hosts_using(name).len()));
+            (host.secret_key(), host.name.clone(), shared)
+        }
+        (None, Some(name)) => {
+            let name = model::validate_credential_name(name).map_err(|e| anyhow::anyhow!(e))?;
+            let used = file.hosts_using(&name).len();
+            (
+                model::credential_secret_key(&name),
+                format!("credential '{name}'"),
+                Some((name, used)),
+            )
+        }
+        (None, None) => anyhow::bail!(
+            "name a host, or a shared credential with --credential; run `ssh-manager list` for hosts \
+             and `ssh-manager credentials` for credentials"
+        ),
+    };
+
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("reading password from stdin")?;
+    let password = line.trim_end_matches(['\n', '\r']);
+    if password.is_empty() {
+        // Printed, not returned: `display::error_line` folds away any line containing a `|`,
+        // which this example has (tracker #41).
+        eprintln!(
+            "Error: nothing on stdin, so nothing was stored. Pipe the password in, e.g. \
+             `printf %s \"$PASS\" | ssh-manager set-password {}`",
+            display::sanitize(&subject)
+        );
+        std::process::exit(1);
+    }
+    secrets::store_password(&paths.vault_file(), &key, password)?;
+    println!(
+        "stored password for {} ({})",
+        display::sanitize(&subject),
+        display::sanitize(&key)
+    );
+    if let Some((name, count)) = shared_with {
+        match count {
+            0 => println!(
+                "note: no host uses credential '{}' yet — bind one with `ssh-manager credentials bind \
+                 {} <host>`",
+                display::sanitize(&name),
+                display::sanitize(&name)
+            ),
+            1 => {}
+            n => println!(
+                "note: '{}' is shared, so all {n} hosts using it now authenticate with this \
+                 password",
+                display::sanitize(&name)
+            ),
+        }
+    }
+    Ok(())
+}
+
+fn cmd_print_command(host_ref: &str) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    let host = resolve_host(&file.hosts, host_ref).with_context(|| {
+        format!("no host with name or id '{host_ref}' — run `ssh-manager list` to see your hosts")
+    })?;
+    // Resolve the secret exactly as connect does, so the printed command is the one ssh-manager
+    // would run (a stored secret changes how a jump host is expressed).
+    let host = host.with_site_defaults(&file.sites);
+    let has_secret = secrets::get_password(&paths.vault_file(), &host.secret_key())
+        .ok()
+        .flatten()
+        .is_some();
+    println!("{}", ssh::command_string(&host, has_secret));
+    Ok(())
+}
+
+fn cmd_list(query: &str, json: bool) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let file = store::load_hosts(&hosts_path)?;
+    let (hosts, sites) = (file.hosts, file.sites);
+    let st = FrecencyState::load(&paths.state_file())?;
+    let order = search::rank(&hosts, &sites, query, &st, cfg.decay_rate, cfg.default_sort);
+
+    // JSON must always be valid (even empty) for scripts — emit before the human messages.
+    if json {
+        let selected: Vec<&Host> = order.iter().map(|&i| &hosts[i]).collect();
+        println!("{}", hosts_to_json(&selected, &sites)?);
+        return Ok(());
+    }
+
+    if hosts.is_empty() {
+        println!("No hosts yet. Add one with `ssh-manager add`, or create:");
+        println!("  {}", hosts_path.display());
+        return Ok(());
+    }
+    if order.is_empty() {
+        println!("No hosts match '{}'.", query.trim());
+        return Ok(());
+    }
+    for &i in &order {
+        println!("{}", list_row(&hosts[i], &sites));
+    }
+    Ok(())
+}
+
+/// One plain-output `ssh-manager list` row: `name  user@host:port  auth  ·site·  [tags]`. The
+/// endpoint resolves the host's site defaults, so an inherited user is the one printed.
+///
+/// Every field here comes out of `hosts.toml` and goes straight to a terminal, so every one of
+/// them is sanitized first — only the auth method is ssh-manager's own word (see [`display`]).
+fn list_row(h: &Host, sites: &[Site]) -> String {
+    let site = h
+        .site
+        .as_deref()
+        .map(|s| format!("  ·{}·", display::sanitize(s)))
+        .unwrap_or_default();
+    let tags = if h.tags.is_empty() {
+        String::new()
+    } else {
+        format!("  [{}]", display::sanitize(&h.tags.join(", ")))
+    };
+    format!(
+        "{:<20}  {:<28}  {}{}{}",
+        display::sanitize(&h.name),
+        display::sanitize(&h.endpoint_in(sites)),
+        h.auth.as_str(),
+        site,
+        tags
+    )
+}
+
+/// A host record plus its generated ssh command, for `ssh-manager list --json`.
+#[derive(Serialize)]
+struct HostJson<'a> {
+    #[serde(flatten)]
+    host: &'a Host,
+    /// The ready-to-run ssh command (ssh-manager's value-add for scripts and integrations).
+    command: String,
+}
+
+/// `command` reflects the host's resolved site defaults; the flattened `host` fields stay
+/// exactly as stored on disk.
+fn hosts_to_json(hosts: &[&Host], sites: &[Site]) -> Result<String> {
+    let items: Vec<HostJson> = hosts
+        .iter()
+        .map(|&h| HostJson {
+            host: h,
+            // `false`: a listing must not read the secret store once per host.
+            command: ssh::command_string(&h.with_site_defaults(sites), false),
+        })
+        .collect();
+    serde_json::to_string_pretty(&items).context("serializing hosts to JSON")
+}
+
+/// Add a host non-interactively from CLI flags.
+fn cmd_add(args: AddArgs) -> Result<()> {
+    let read_secret = args.password_stdin;
+    let host = args.into_host()?;
+    save_new_host(host, || stdin_secret(read_secret), false)
+}
+
+/// `ssh-manager add --from-ssh`: read the command line, map it onto a host (D-034), then open the add
+/// form on it, or with `--quiet` save it straight away. With `--password-stdin` as well, the
+/// command line is stdin's first line and the secret its second.
+fn cmd_add_from_ssh(args: AddArgs) -> Result<()> {
+    let line = read_ssh_command(args.from_ssh.flatten())?;
+    let parsed = sshcmd::parse(&line)?;
+    let notes = parsed.notes.clone();
+    let mut host = parsed.into_host(args.name);
+    host.tags = args.tags;
+    host.site = args.site;
+    host.credential = args
+        .credential
+        .as_deref()
+        .map(model::validate_credential_name)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!(e))?;
+    host.requires_2fa = args.requires_2fa;
+    // `--password-stdin` implies password auth, unless an `-i` on the line made it a key host.
+    if args.password_stdin && host.auth == AuthMethod::Agent {
+        host.auth = AuthMethod::Password;
+    }
+    let print_notes = |notes: &[String]| {
+        for note in notes {
+            println!("note: {}", display::sanitize(note));
+        }
+    };
+    if args.quiet {
+        print_notes(&notes);
+        return save_new_host(host, || stdin_secret(args.password_stdin), true);
+    }
+    // Everything stdin carries is read before the form takes the terminal over.
+    let secret = stdin_secret(args.password_stdin)?;
+    if !stdin_on_terminal() {
+        println!("note: there is no terminal to open the form on, so the host is added without it");
+        print_notes(&notes);
+        return save_new_host(host, move || Ok(secret), true);
+    }
+    app::run_add_prefilled(host, notes, secret.map(Zeroizing::new))
+}
+
+/// Make sure the add form can read keys when stdin was a pipe (`echo 'ssh ...' | ssh-manager add
+/// --from-ssh`). False when there is no terminal to read from at all.
+///
+/// crossterm falls back to opening `/dev/tty` when stdin is not a terminal, but on macOS its
+/// event source registers that descriptor with kqueue, which refuses the `/dev/tty` alias with
+/// `EINVAL` and the TUI stops at "Failed to initialize input reader". kqueue does accept the
+/// terminal's own device, so that is opened (the name `ttyname` gives for stdout or stderr,
+/// `/dev/tty` only as a last resort) and put on fd 0, where crossterm reads it like any other
+/// terminal stdin. The pipe has been read to the end of what ssh-manager needs by then.
+#[cfg(unix)]
+fn stdin_on_terminal() -> bool {
+    std::io::stdin().is_terminal() || stdin_from_terminal_device()
+}
+
+/// Open this process's terminal **by device name** and put it on fd 0, so crossterm reads keys
+/// from it like any other terminal stdin. `false` if there is no terminal to find.
+///
+/// Callers that already know fd 0 is unusable (a pipe, or a shell widget's stdin) call this
+/// directly; [`stdin_is_readable_terminal`] is the test for the ones that don't.
+#[cfg(unix)]
+pub(crate) fn stdin_from_terminal_device() -> bool {
+    use std::os::fd::AsRawFd;
+
+    let Some(device) = terminal_device() else {
+        return false;
+    };
+    let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&device)
+    else {
+        return false;
+    };
+    // SAFETY: both descriptors are open. `dup2` makes fd 0 a copy of `tty` without close-on-exec,
+    // so a connect from the TUI hands the terminal on to ssh; `tty` itself closes on drop.
+    unsafe { libc::dup2(tty.as_raw_fd(), libc::STDIN_FILENO) != -1 }
+}
+
+/// Whether fd 0 is a terminal **crossterm can read from**: a real device rather than the
+/// `/dev/tty` alias, which kqueue refuses (the same `EINVAL` as above, and a shell widget hands
+/// its child exactly that alias when it redirects stdin).
+#[cfg(unix)]
+pub(crate) fn stdin_is_readable_terminal() -> bool {
+    std::io::stdin().is_terminal()
+        && ttyname_of(libc::STDIN_FILENO).is_some_and(|p| p != Path::new(DEV_TTY))
+}
+
+/// This process's terminal as a path under `/dev` that kqueue will accept, or `None` when it has
+/// no terminal at all.
+///
+/// `ttyname` answers first, asked of the streams most likely to still be attached. On macOS it
+/// answers `/dev/tty` for a descriptor that was itself opened from `/dev/tty`, so when every
+/// stream is that alias the device is recovered from the descriptor's identity instead of its
+/// name.
+#[cfg(unix)]
+pub(crate) fn terminal_device() -> Option<PathBuf> {
+    [libc::STDERR_FILENO, libc::STDOUT_FILENO, libc::STDIN_FILENO]
+        .into_iter()
+        .filter(|&fd| unsafe { libc::isatty(fd) } == 1)
+        .find_map(|fd| ttyname_of(fd).filter(|p| p != Path::new(DEV_TTY)))
+        .or_else(device_behind_the_alias)
+}
+
+#[cfg(unix)]
+const DEV_TTY: &str = "/dev/tty";
+
+/// The device `ttyname` reports for `fd`, if it reports one.
+#[cfg(unix)]
+fn ttyname_of(fd: i32) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    // SAFETY: `ttyname` returns null or a NUL-terminated string in a static buffer, which is
+    // copied out at once; nothing else in this single-threaded startup calls it.
+    let name = unsafe { libc::ttyname(fd) };
+    (!name.is_null()).then(|| {
+        let bytes = unsafe { std::ffi::CStr::from_ptr(name) }.to_bytes();
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    })
+}
+
+/// The real device behind `/dev/tty`, for when that alias is all this process can see.
+///
+/// Linux names an open descriptor through `/proc`. macOS does not, and `fstat` on a descriptor
+/// opened from `/dev/tty` reports that alias's own device number (major 2, minor 0) rather than
+/// the terminal's, so there the controlling terminal is asked for by identity instead.
+#[cfg(all(unix, target_os = "linux"))]
+fn device_behind_the_alias() -> Option<PathBuf> {
+    use std::os::fd::AsRawFd;
+
+    let tty = std::fs::File::open(DEV_TTY).ok()?;
+    std::fs::read_link(format!("/proc/self/fd/{}", tty.as_raw_fd()))
+        .ok()
+        .filter(|p| p.is_absolute() && p != Path::new(DEV_TTY))
+}
+
+#[cfg(all(unix, target_vendor = "apple"))]
+fn device_behind_the_alias() -> Option<PathBuf> {
+    use std::ffi::{CStr, OsStr, c_void};
+    use std::os::unix::ffi::OsStrExt;
+
+    // `e_tdev` is this process's controlling terminal, as a device number; `devname` turns that
+    // into the bare name under /dev ("ttys004") that kqueue will accept.
+    let mut info = unsafe { std::mem::zeroed::<libc::proc_bsdinfo>() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    // SAFETY: the buffer is `size` bytes of exactly the type the flavor names, and the call only
+    // writes into it. A short write means the field below was not filled in, so it is rejected.
+    let filled = unsafe {
+        libc::proc_pidinfo(
+            std::process::id() as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut info).cast::<c_void>(),
+            size,
+        )
+    };
+    if filled != size || info.e_tdev == 0 || info.e_tdev == u32::MAX {
+        return None;
+    }
+    // SAFETY: `devname` returns null or a NUL-terminated name in a static buffer, copied out at
+    // once; nothing else here calls it.
+    let name = unsafe { libc::devname(info.e_tdev as libc::dev_t, libc::S_IFCHR) };
+    if name.is_null() {
+        return None;
+    }
+    let bytes = unsafe { CStr::from_ptr(name) }.to_bytes();
+    Some(Path::new("/dev").join(OsStr::from_bytes(bytes)))
+}
+
+#[cfg(all(unix, not(target_os = "linux"), not(target_vendor = "apple")))]
+fn device_behind_the_alias() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(unix))]
+pub(crate) fn stdin_from_terminal_device() -> bool {
+    false
+}
+
+#[cfg(not(unix))]
+pub(crate) fn terminal_device() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(unix))]
+pub(crate) fn stdin_is_readable_terminal() -> bool {
+    std::io::stdin().is_terminal()
+}
+
+#[cfg(not(unix))]
+fn stdin_on_terminal() -> bool {
+    std::io::stdin().is_terminal()
+}
+
+/// The command line for `--from-ssh`: the flag's value, or one line of stdin when there is no
+/// value or it is `-`. No value on a terminal is a mistake rather than something to wait for.
+fn read_ssh_command(value: Option<String>) -> Result<String> {
+    use std::io::BufRead;
+    match value {
+        Some(v) if v != "-" => return Ok(v),
+        None if std::io::stdin().is_terminal() => {
+            // Printed here rather than returned: the shared error printer drops any line with a
+            // `|` in it (that is how it folds away a toml parse diagram), and the example needs one.
+            eprintln!(
+                "Error: --from-ssh needs the ssh command. Pass it as one quoted string:\n  \
+                 ssh-manager add --from-ssh 'ssh -i k.pem user@host'\nor pipe it in:\n  \
+                 echo 'ssh ...' | ssh-manager add --from-ssh"
+            );
+            std::process::exit(1);
+        }
+        _ => {}
+    }
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("reading the ssh command from stdin")?;
+    Ok(line.trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// One secret from the next line of stdin, for `--password-stdin`.
+fn read_stdin_secret() -> Result<String> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("reading secret from stdin")?;
+    let s = line.trim_end_matches(['\n', '\r']).to_string();
+    if s.is_empty() {
+        anyhow::bail!(
+            "--password-stdin was given but stdin was empty — nothing added; pipe the \
+             secret in, e.g. `printf %s \"$PASS\" | ssh-manager add …`"
+        );
+    }
+    Ok(s)
+}
+
+/// The secret on the next line of stdin when `wanted`, for `--password-stdin`.
+fn stdin_secret(wanted: bool) -> Result<Option<String>> {
+    wanted.then(read_stdin_secret).transpose()
+}
+
+/// Save one new host, and the secret `secret` produces, if any. `secret` runs after the name
+/// check, so a taken name doesn't sit waiting on stdin. Shared by `add` with flags and every
+/// non-interactive `add --from-ssh`; `from_ssh` only changes the advice when the name is taken.
+fn save_new_host(
+    host: Host,
+    secret: impl FnOnce() -> Result<Option<String>>,
+    from_ssh: bool,
+) -> Result<()> {
+    let auth = host.auth;
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+    if file.hosts.iter().any(|h| h.name == host.name) {
+        let name = display::sanitize(&host.name);
+        if from_ssh {
+            anyhow::bail!(
+                "a host named '{name}' already exists; give this one a name of its own in front \
+                 of the flag: `ssh-manager add NAME --from-ssh ...`"
+            );
+        }
+        anyhow::bail!(
+            "a host named '{name}' already exists — pick another name (or edit it in the TUI)"
+        );
+    }
+    if let Some(site) = &host.site
+        && crate::model::find_site(&file.sites, site).is_none()
+    {
+        let site = display::sanitize(site);
+        println!(
+            "note: site '{site}' isn't defined yet — add it with `ssh-manager sites add {site}` (or F3 in the TUI)"
+        );
+    }
+
+    // Read the secret before writing anything, so empty stdin can't leave a half-added host.
+    let secret = secret()?;
+
+    let id = host.id.clone();
+    let name = host.name.clone();
+    // Whichever key this host resolves to: its own id, or the shared credential it names. A
+    // `--credential X --password-stdin` add must populate X, not a key nothing reads.
+    let secret_key = host.secret_key();
+    let credential = host.credential.clone();
+    file.hosts.push(host);
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+    warn_export_refresh(export::refresh_if_exported(&paths, &file));
+    if let Some(s) = &secret {
+        secrets::store_password(&paths.vault_file(), &secret_key, s)?;
+    }
+    let name = display::sanitize(&name);
+    println!("added '{name}' ({id})");
+
+    // What the host still needs, if anything. A host on a shared credential needs nothing when
+    // that credential already has a value, which is the whole point of binding it at add time.
+    match &credential {
+        Some(cred) => {
+            let have = secret.is_some()
+                || secrets::get_password(&paths.vault_file(), &secret_key)
+                    .ok()
+                    .flatten()
+                    .is_some();
+            let cred = display::sanitize(cred);
+            if have {
+                println!("note: it reads its secret from credential '{cred}', which is set");
+            } else {
+                println!(
+                    "note: it reads its secret from credential '{cred}', which has nothing stored \
+                     yet — set it once with `printf %s \"$PASS\" | ssh-manager set-password \
+                     --credential {cred}`, or let the first connect ask"
+                );
+            }
+        }
+        None if auth == AuthMethod::Password && secret.is_none() => {
+            println!(
+                "note: password auth set but no password stored — run `ssh-manager set-password {name}`"
+            );
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+/// `ssh-manager doctor` — gather every input, print one line per check, exit 1 if any failed.
+///
+/// Everything IO-shaped happens here so `doctor.rs` stays a set of pure functions over the
+/// results. Nothing here writes, with the single documented exception of the keyring probe
+/// (`secrets::probe`), which round-trips a throwaway entry and deletes it again.
+fn cmd_doctor() -> Result<()> {
+    let paths = Paths::resolve()?;
+    // Measured BEFORE `ensure_dirs`, which chmods the directory to 0700: read afterwards, the
+    // check could only ever confirm the mode ssh-manager had just forced.
+    let config_dir_permissions = config_dir_permissions(&paths.config_dir);
+    // And best-effort, because on a directory owned by another user the chmod fails with
+    // EPERM — which is precisely the state the report below exists to explain, not a reason to
+    // abort before printing it.
+    if let Err(e) = paths.ensure_dirs() {
+        eprintln!(
+            "ssh-manager: warning: {}",
+            display::error_line(&format!("{e:#}"))
+        );
+    }
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let loaded = store::load_hosts(&hosts_path).map_err(|e| format!("{e:#}"));
+
+    // The exported fragment is compared against a freshly rendered one, so an empty database
+    // (or an unreadable one) still produces something to compare with.
+    let export_path = paths.ssh_config_file();
+    let export_display = export_path.display().to_string();
+    let export_fresh = match &loaded {
+        Ok(file) => export::render(file, &export_display),
+        Err(_) => String::new(),
+    };
+
+    let checks = doctor::run(&doctor::Inputs {
+        ssh_version: ssh_version(),
+        hosts: loaded.as_ref().map_err(Clone::clone),
+        hosts_path: &hosts_path,
+        backend: secrets::backend(),
+        probe: secrets::probe(&paths.vault_file()).map_err(|e| format!("{e:#}")),
+        stored_ids: secrets::stored_ids(&paths.vault_file()).ok().flatten(),
+        auth_sock: std::env::var("SSH_AUTH_SOCK").ok(),
+        export_existing: std::fs::read_to_string(&export_path).ok(),
+        export_fresh,
+        export_path: &export_path,
+        config_dir: &paths.config_dir,
+        config_dir_permissions,
+    });
+
+    println!("ssh-manager doctor — checking this machine and your host database\n");
+    for check in &checks {
+        println!("{}", check.render());
+    }
+    println!("\n{}", doctor::summary(&checks));
+    if !doctor::healthy(&checks) {
+        // A plain exit code, not an anyhow error: the report above already said everything,
+        // and an "Error:" line on top of it would only repeat one of the checks. No terminal
+        // state to restore — `doctor` never enters the TUI.
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// The config directory's permission bits plus whether its owner is the user running ssh-manager.
+///
+/// A `stat`, and nothing else — `doctor` stays read-only (D-027). `None` means the check is
+/// left out of the report: on a platform without unix permissions there is nothing to say, and
+/// on a directory that can't be read a verdict would be invented rather than measured.
+#[cfg(unix)]
+fn config_dir_permissions(dir: &Path) -> Option<doctor::DirPermissions> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(dir).ok()?;
+    Some(doctor::DirPermissions {
+        mode: meta.mode() & 0o777,
+        // SAFETY: `getuid` always succeeds, takes no argument, and touches no memory.
+        owned_by_me: meta.uid() == unsafe { libc::getuid() },
+    })
+}
+
+#[cfg(not(unix))]
+fn config_dir_permissions(_dir: &Path) -> Option<doctor::DirPermissions> {
+    None
+}
+
+/// `ssh -V`, which OpenSSH prints on **stderr**. `None` if the binary can't be run at all.
+fn ssh_version() -> Option<String> {
+    let out = std::process::Command::new("ssh").arg("-V").output().ok()?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+fn cmd_credentials(action: Option<CredentialsAction>, json: bool) -> Result<()> {
+    match action {
+        Some(CredentialsAction::List { json }) => cmd_credentials_list(json),
+        None => cmd_credentials_list(json),
+        Some(CredentialsAction::Add {
+            name,
+            note,
+            password_stdin,
+        }) => cmd_credentials_add(name, note, password_stdin),
+        Some(CredentialsAction::Rm { name, force }) => cmd_credentials_rm(name, force),
+        Some(CredentialsAction::Bind { name, hosts }) => cmd_credentials_bind(Some(name), hosts),
+        Some(CredentialsAction::Unbind { hosts }) => cmd_credentials_bind(None, hosts),
+    }
+}
+
+/// One row per credential: who uses it, and whether its secret is actually there. A credential
+/// with hosts but no stored secret is the state that makes every one of those hosts prompt, so
+/// it is worth seeing at a glance.
+fn cmd_credentials_list(json: bool) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    let vault = paths.vault_file();
+    let stored = |key: &str| secrets::get_password(&vault, key).ok().flatten().is_some();
+
+    // Names a host points at with no `[[credential]]` entry: still resolved, so listed too.
+    let undeclared = file.undeclared_credentials();
+    if json {
+        #[derive(Serialize)]
+        struct Row<'a> {
+            name: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            source: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            note: Option<&'a str>,
+            hosts: Vec<&'a str>,
+            secret_stored: bool,
+            declared: bool,
+        }
+        let mut rows: Vec<Row> = file
+            .credentials
+            .iter()
+            .map(|c| Row {
+                name: &c.name,
+                source: c.source.as_deref(),
+                note: c.note.as_deref(),
+                hosts: file
+                    .hosts_using(&c.name)
+                    .iter()
+                    .map(|h| h.name.as_str())
+                    .collect(),
+                secret_stored: stored(&c.secret_key()),
+                declared: true,
+            })
+            .collect();
+        for name in &undeclared {
+            rows.push(Row {
+                name,
+                source: None,
+                note: None,
+                hosts: file
+                    .hosts_using(name)
+                    .iter()
+                    .map(|h| h.name.as_str())
+                    .collect(),
+                secret_stored: stored(&model::credential_secret_key(name)),
+                declared: false,
+            });
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&rows).context("serializing credentials to JSON")?
+        );
+        return Ok(());
+    }
+
+    if file.credentials.is_empty() && undeclared.is_empty() {
+        println!(
+            "No shared credentials yet. Define one with `ssh-manager credentials add <name>`, then \
+             bind hosts to it with `ssh-manager credentials bind <name> <host>...` (or mark hosts in \
+             the TUI with ^s and press ^k)."
+        );
+        return Ok(());
+    }
+    for c in &file.credentials {
+        let used = file.hosts_using(&c.name).len();
+        let secret = if stored(&c.secret_key()) {
+            "secret stored"
+        } else {
+            "no secret yet"
+        };
+        let note = c.note.as_deref().unwrap_or("");
+        println!(
+            "{:<24}  {} host(s)  {:<14}  {}",
+            display::sanitize(&c.name),
+            used,
+            secret,
+            display::sanitize(note)
+        );
+    }
+    for name in &undeclared {
+        println!(
+            "{:<24}  {} host(s)  {:<14}  (used by a host, not declared; add it with `ssh-manager \
+             credentials add {}`)",
+            display::sanitize(name),
+            file.hosts_using(name).len(),
+            if stored(&model::credential_secret_key(name)) {
+                "secret stored"
+            } else {
+                "no secret yet"
+            },
+            display::sanitize(name)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_credentials_add(name: String, note: Option<String>, password_stdin: bool) -> Result<()> {
+    let name = model::validate_credential_name(&name).map_err(|e| anyhow::anyhow!(e))?;
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+    if model::find_credential(&file.credentials, &name).is_some() {
+        anyhow::bail!(
+            "a credential named '{}' already exists — `ssh-manager credentials` lists them",
+            display::sanitize(&name)
+        );
+    }
+    // Read stdin before writing anything, so empty input cannot leave a credential with no
+    // secret and a message saying it has one.
+    let secret = stdin_secret(password_stdin)?;
+
+    let mut cred = model::Credential::new(&name);
+    cred.note = note;
+    file.credentials.push(cred);
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+    if let Some(s) = &secret {
+        secrets::store_password(&paths.vault_file(), &model::credential_secret_key(&name), s)?;
+    }
+    let name = display::sanitize(&name);
+    println!("added credential '{name}'");
+    match secret {
+        Some(_) => println!(
+            "next: bind hosts to it with `ssh-manager credentials bind {name} <host>...`, or add them \
+             with `ssh-manager add <name> -H <addr> --credential {name}`"
+        ),
+        None => println!(
+            "next: `printf %s \"$PASS\" | ssh-manager set-password --credential {name}`, then bind hosts \
+             with `ssh-manager credentials bind {name} <host>...`"
+        ),
+    }
+    Ok(())
+}
+
+fn cmd_credentials_rm(name: String, force: bool) -> Result<()> {
+    let name = model::validate_credential_name(&name).map_err(|e| anyhow::anyhow!(e))?;
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+
+    let users: Vec<String> = file
+        .hosts_using(&name)
+        .iter()
+        .map(|h| display::sanitize(&h.name))
+        .collect();
+    if !users.is_empty() && !force {
+        anyhow::bail!(
+            "{} host(s) still use '{}' ({}) — unbind them first, or pass --force to unbind them \
+             and remove it",
+            users.len(),
+            display::sanitize(&name),
+            users.join(", ")
+        );
+    }
+    let declared = model::find_credential(&file.credentials, &name).is_some();
+    if !declared && users.is_empty() {
+        anyhow::bail!(
+            "no credential named '{}' — `ssh-manager credentials` lists them",
+            display::sanitize(&name)
+        );
+    }
+    let unbound = users.len();
+    for h in &mut file.hosts {
+        if h.credential
+            .as_deref()
+            .is_some_and(|c| c.eq_ignore_ascii_case(&name))
+        {
+            h.credential = None;
+        }
+    }
+    file.credentials
+        .retain(|c| !c.name.eq_ignore_ascii_case(&name));
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+
+    // The definition is gone, so its secret can never be reached again: remove it rather than
+    // leaving an unreferenced value in the keyring (`doctor` would report it as an orphan).
+    let key = model::credential_secret_key(&name);
+    if let Err(e) = secrets::delete_password(&paths.vault_file(), &key) {
+        eprintln!("ssh-manager: warning: could not delete the stored secret: {e:#}");
+    }
+    println!(
+        "removed credential '{}'{}",
+        display::sanitize(&name),
+        match unbound {
+            0 => String::new(),
+            n => format!(
+                " ({n} host(s) now have their own secret again, and will ask on the next connect)"
+            ),
+        }
+    );
+    Ok(())
+}
+
+/// Bind hosts to a credential, or unbind them when `name` is `None`.
+fn cmd_credentials_bind(name: Option<String>, host_refs: Vec<String>) -> Result<()> {
+    let name = match name {
+        Some(n) => Some(model::validate_credential_name(&n).map_err(|e| anyhow::anyhow!(e))?),
+        None => None,
+    };
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+
+    // Resolve every host first: a half-applied bind is worse than none.
+    let mut idxs: Vec<usize> = Vec::new();
+    for r in &host_refs {
+        let idx = file
+            .hosts
+            .iter()
+            .position(|h| h.id == *r || h.name == *r)
+            .with_context(|| {
+                format!(
+                    "no host with name or id '{}' — run `ssh-manager list` to see your hosts",
+                    display::sanitize(r)
+                )
+            })?;
+        if !idxs.contains(&idx) {
+            idxs.push(idx);
+        }
+    }
+    for &i in &idxs {
+        file.hosts[i].credential = name.clone();
+    }
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+
+    match &name {
+        Some(name) => {
+            let key = model::credential_secret_key(name);
+            let have = secrets::get_password(&paths.vault_file(), &key)
+                .ok()
+                .flatten()
+                .is_some();
+            println!(
+                "bound {} host(s) to '{}'",
+                idxs.len(),
+                display::sanitize(name)
+            );
+            if !have {
+                println!(
+                    "note: nothing stored for '{}' yet — set it with `printf %s \"$PASS\" | \
+                     ssh-manager set-password --credential {}`, or let the first connect ask",
+                    display::sanitize(name),
+                    display::sanitize(name)
+                );
+            }
+            if model::find_credential(&file.credentials, name).is_none() {
+                println!(
+                    "note: '{}' has no [[credential]] entry; it still works, and `ssh-manager \
+                     credentials add {}` records it",
+                    display::sanitize(name),
+                    display::sanitize(name)
+                );
+            }
+        }
+        None => println!(
+            "unbound {} host(s) — each has its own secret again, and will ask on the next connect",
+            idxs.len()
+        ),
+    }
+    Ok(())
+}
+
+fn cmd_sites(action: Option<SitesAction>, json: bool) -> Result<()> {
+    match action {
+        Some(SitesAction::Add {
+            name,
+            user,
+            port,
+            jump_hosts,
+            identity_files,
+        }) => cmd_sites_add(name, user, port, jump_hosts, identity_files),
+        Some(SitesAction::List { json }) => cmd_sites_list(json),
+        None => cmd_sites_list(json),
+    }
+}
+
+fn cmd_sites_list(json: bool) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&file.sites).context("serializing sites to JSON")?
+        );
+        return Ok(());
+    }
+    if file.sites.is_empty() {
+        println!("No sites yet. Add one with `ssh-manager sites add <name>`, or in the TUI (F3).");
+        return Ok(());
+    }
+    for s in &file.sites {
+        let members = file
+            .hosts
+            .iter()
+            .filter(|h| {
+                h.site
+                    .as_deref()
+                    .is_some_and(|x| x.eq_ignore_ascii_case(&s.name))
+            })
+            .count();
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(u) = &s.user {
+            parts.push(format!("user={u}"));
+        }
+        if let Some(p) = s.port {
+            parts.push(format!("port={p}"));
+        }
+        if !s.jump_hosts.is_empty() {
+            parts.push(format!("jump={}", s.jump_hosts.join(",")));
+        }
+        if !s.identity_files.is_empty() {
+            parts.push(format!("identity={}", s.identity_files.join(",")));
+        }
+        let defaults = if parts.is_empty() {
+            "(grouping only)".to_string()
+        } else {
+            parts.join("  ")
+        };
+        println!(
+            "{:<20}  {} host(s)  {}",
+            display::sanitize(&s.name),
+            members,
+            display::sanitize(&defaults)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_sites_add(
+    name: String,
+    user: Option<String>,
+    port: Option<u16>,
+    jump_hosts: Vec<String>,
+    identity_files: Vec<String>,
+) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let hosts_path = cfg.hosts_path(&paths);
+    let (mut file, rev) = store::load_hosts_stamped(&hosts_path)?;
+    if crate::model::find_site(&file.sites, &name).is_some() {
+        anyhow::bail!(
+            "a site named '{}' already exists — pick another name, or edit that one with F3 \
+             in the TUI",
+            display::sanitize(&name)
+        );
+    }
+    file.sites.push(Site {
+        name: name.clone(),
+        user,
+        port,
+        jump_hosts,
+        identity_files,
+    });
+    store::save_hosts_if_unchanged(&hosts_path, &file, rev.as_ref())?;
+    // Site defaults are resolved into the exported blocks, so a new site refreshes it too.
+    warn_export_refresh(export::refresh_if_exported(&paths, &file));
+    println!("added site '{}'", display::sanitize(&name));
+    Ok(())
+}
+
+/// Connect directly to a host by name or id, skipping the TUI.
+fn cmd_connect(host_ref: &str, remote: &ssh::RemoteCommand) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    let (hosts, sites) = (file.hosts, file.sites);
+
+    let Some(host) = resolve_host(&hosts, host_ref).cloned() else {
+        let st = FrecencyState::load(&paths.state_file()).unwrap_or_default();
+        let order = search::rank(
+            &hosts,
+            &sites,
+            host_ref,
+            &st,
+            cfg.decay_rate,
+            cfg.default_sort,
+        );
+        if order.is_empty() {
+            anyhow::bail!("no host named '{host_ref}' — run `ssh-manager list` to see your hosts");
+        }
+        let names: Vec<String> = order
+            .iter()
+            .take(5)
+            .map(|&i| display::sanitize(&hosts[i].name))
+            .collect();
+        anyhow::bail!(
+            "no host named '{host_ref}' — did you mean: {}",
+            names.join(", ")
+        );
+    };
+    connect(&host.with_site_defaults(&sites), &paths, remote)
+}
+
+/// Reconnect to the most-recently-used host (`ssh-manager -`).
+fn cmd_connect_last(remote: &ssh::RemoteCommand) -> Result<()> {
+    let paths = Paths::resolve()?;
+    paths.ensure_dirs()?;
+    let _ = Config::ensure_default_file(&paths.config_file()); // best-effort
+    let cfg = Config::load(&paths.config_file())?;
+    let file = store::load_hosts(&cfg.hosts_path(&paths))?;
+    let st = FrecencyState::load(&paths.state_file())?;
+    let id = last_used_id(&st)
+        .context("no recent host yet — connect to one first, then `ssh-manager -` reconnects to it")?;
+    let host = file
+        .hosts
+        .iter()
+        .find(|h| h.id == id)
+        .cloned()
+        .context("the last-used host is no longer in your list — run `ssh-manager list`")?;
+    connect(&host.with_site_defaults(&file.sites), &paths, remote)
+}
+
+/// Record frecency BEFORE `exec()` (nothing runs after a successful exec), then hand over.
+fn connect(host: &Host, paths: &Paths, remote: &ssh::RemoteCommand) -> Result<()> {
+    let mut st = FrecencyState::load(&paths.state_file())?;
+    st.record_use(&host.id);
+    if let Err(e) = st.save(&paths.state_file()) {
+        eprintln!("ssh-manager: warning: could not save state: {e:#}");
+    }
+    Err(handoff(host, paths, None, remote))
+}
+
+/// Everything between the frecency save and the `exec()`, shared by `ssh-manager <host>` and the TUI
+/// (whose terminal is already restored by then): the first-connect capture (D-035), the 2FA
+/// code, the multi-hop notice, and the handoff. `SSH_ASKPASS` is wired only when a secret is
+/// stored.
+///
+/// `popup_code` is a code the TUI already collected. Without one, a `requires_2fa` host is asked
+/// on the terminal, after the secret, because the code is the one that goes stale. Returns only
+/// on failure; a cancel, or a first secret that did not work, ends the process.
+fn handoff(
+    host: &Host,
+    paths: &Paths,
+    popup_code: Option<Zeroizing<String>>,
+    remote: &ssh::RemoteCommand,
+) -> anyhow::Error {
+    let stored = secrets::get_password(&paths.vault_file(), &host.secret_key())
+        .ok()
+        .flatten()
+        .is_some();
+    let has_secret = stored || capture_first_secret(host, paths);
+    let code = match popup_code {
+        Some(code) => Some(code),
+        None => match prompt_2fa_code(host) {
+            SecretPrompt::None => None,
+            SecretPrompt::Value(code) => Some(code),
+            SecretPrompt::Cancelled => cancel_connect(host),
+        },
+    };
+    // A chain of hops can't be constrained the way one can, so nothing is wired and ssh asks
+    // on the terminal instead. Say so before it does (D-029).
+    if matches!(
+        ssh::jump_plan(host, has_secret || code.is_some()),
+        ssh::JumpPlan::Terminal
+    ) {
+        eprintln!("ssh-manager: {}", ssh::MULTI_HOP_NOTICE);
+    }
+    // Replaces this process on success; returns only on failure. The code stays in its
+    // zeroizing buffer right up to the handoff.
+    ssh::exec_connect(
+        host,
+        has_secret,
+        code.as_deref().map(String::as_str),
+        remote,
+    )
+}
+
+/// Back out of a prompt without connecting. In raw mode Ctrl-C is a key press, not a signal, so
+/// the abort it used to mean has to be done by hand — and it has to happen *before* the exec, or
+/// backing out of the prompt would connect anyway. 130 is the shell's code for "interrupted".
+fn cancel_connect(host: &Host) -> ! {
+    eprintln!(
+        "cancelled — not connecting to {}",
+        display::sanitize(&host.name)
+    );
+    std::process::exit(130);
+}
+
+/// `user@host` as the connect will use it, with the port when it isn't 22. `host` has its site
+/// defaults resolved already.
+fn login_endpoint(host: &Host) -> String {
+    let endpoint = format!("{}@{}", host.effective_user(), host.hostname);
+    match host.port {
+        Some(port) if port != 22 => format!("{endpoint}:{port}"),
+        _ => endpoint,
+    }
+}
+
+/// The first-connect capture (D-035), for a host with nothing stored: ask for the password or
+/// passphrase, store it, prove it with a throwaway `ssh ... exit`, and keep it only if that
+/// worked. Returns whether a secret is stored now.
+///
+/// The secret has to be in the store before the check, because the helper reads the store and
+/// nothing else can carry it to ssh. A secret that was refused, or that could not be checked,
+/// is removed again and the process exits 1.
+fn capture_first_secret(host: &Host, paths: &Paths) -> bool {
+    use first_connect::{Decision, Probe, Verdict};
+
+    let (decision, key) = first_connect::assess(host, || false, false);
+    match decision {
+        Decision::AskPassword => {}
+        Decision::ProbeKey if first_connect::probe(host) == Probe::Ask => {}
+        Decision::ProbeKey | Decision::Connect | Decision::StepAside => return false,
+    }
+    let endpoint = display::sanitize(&login_endpoint(host));
+    let (kind, subject) = match &key {
+        Some(key) => (
+            "passphrase",
+            format!("Passphrase for {}", display::sanitize(key)),
+        ),
+        None => ("password", format!("Password for {endpoint}")),
+    };
+    let store = match secrets::backend() {
+        secrets::Backend::Vault => "vault",
+        secrets::Backend::Keyring => "keyring",
+    };
+    let prompt = format!("{subject} (saved to your {store} once it works; Enter to skip): ");
+    let secret = match read_secret_line(&prompt) {
+        SecretPrompt::Value(secret) => secret,
+        // Enter skips: connect exactly as before and let ssh ask. Nothing is remembered.
+        SecretPrompt::None => return false,
+        SecretPrompt::Cancelled => cancel_connect(host),
+    };
+
+    let name = display::sanitize(&host.name);
+    let vault = paths.vault_file();
+    if let Err(e) = secrets::store_password(&vault, &host.secret_key(), &secret) {
+        eprintln!(
+            "ssh-manager: could not save the {kind}: {}; connecting without it",
+            display::error_line(&format!("{e:#}"))
+        );
+        return false;
+    }
+    drop(secret);
+
+    // A check would use up the code this host is about to ask for.
+    if host.requires_2fa {
+        eprintln!(
+            "saved {kind} for {name} (not checked: this host needs a code; if the login fails, \
+             press ^e in the TUI or run ssh-manager set-password {name})"
+        );
+        return true;
+    }
+
+    let failure = match first_connect::verify(host) {
+        Verdict::Worked => {
+            eprintln!("saved {kind} for {name}");
+            return true;
+        }
+        Verdict::Refused => format!("the {kind} was refused by {endpoint}"),
+        Verdict::Failed(stderr) => {
+            let why = ssh::classify_auth_error(&stderr, host, true)
+                .or_else(|| {
+                    stderr
+                        .lines()
+                        .map(str::trim)
+                        .rfind(|l| !l.is_empty())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "ssh gave no reason".to_string());
+            format!(
+                "could not check the {kind} against {endpoint}: {}",
+                display::sanitize(&why)
+            )
+        }
+    };
+    match secrets::delete_password(&vault, &host.secret_key()) {
+        Ok(()) => eprintln!("{failure}; nothing saved"),
+        Err(e) => eprintln!(
+            "{failure}, and removing it again failed: {}; replace it with ssh-manager set-password {name}",
+            display::error_line(&format!("{e:#}"))
+        ),
+    }
+    std::process::exit(1);
+}
+
+/// How reading a secret or a one-time code off the terminal ended.
+///
+/// Cancelling is deliberately not the same as "nothing": before the code prompt read with echo
+/// off, Ctrl-C raised SIGINT and killed ssh-manager outright, and a user who realises mid-prompt that
+/// they are pointed at the wrong host must still be able to stop rather than be exec'd into it.
+enum SecretPrompt {
+    /// No question was asked, or nothing usable was read (an empty line, a failed read).
+    None,
+    /// What the user typed.
+    Value(Zeroizing<String>),
+    /// Esc, Ctrl-C or Ctrl-D: back out without connecting.
+    Cancelled,
+}
+
+/// For a host flagged `requires_2fa`, prompt on the terminal for the one-time code before the
+/// `exec()` handoff (the CLI has no TUI popup). [`SecretPrompt::None`] for non-2FA hosts and when
+/// the read fails; [`SecretPrompt::Cancelled`] when the user backs out.
+///
+/// On a terminal the code is read with echo **off**, so it never reaches scrollback, a
+/// terminal log, or a screen recording. A piped stdin keeps the plain line read, because
+/// scripts feed the code in that way. Either way the value lives in a zeroizing buffer until
+/// the connect path takes it — it still crosses to `ssh` through the environment, which is the
+/// trade-off D-022 documents and does not change here.
+fn prompt_2fa_code(host: &Host) -> SecretPrompt {
+    if !host.requires_2fa {
+        return SecretPrompt::None;
+    }
+    let prompt = format!("Verification code for {}: ", display::sanitize(&host.name));
+    read_line_with(&prompt, str::trim)
+}
+
+/// Ask for a password or key passphrase on the terminal: the 2FA code's reader, except a piped
+/// line keeps its spaces, since a secret may have them. Only the line ending is dropped.
+fn read_secret_line(prompt: &str) -> SecretPrompt {
+    read_line_with(prompt, trim_line_ending)
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    line.trim_end_matches(['\n', '\r'])
+}
+
+/// Print `prompt` on stderr and read one answer: with echo off from a terminal, or as a plain
+/// line from a piped stdin, tidied by `piped`. An empty answer is [`SecretPrompt::None`].
+fn read_line_with(prompt: &str, piped: fn(&str) -> &str) -> SecretPrompt {
+    use std::io::Write;
+    eprint!("{prompt}");
+    let _ = std::io::stderr().flush();
+    let read = if std::io::stdin().is_terminal() {
+        read_code_hidden()
+    } else {
+        read_code_piped(piped)
+    };
+    // Nothing echoed the Enter that ended the answer (and a pipe never sends one), so the next
+    // thing printed would otherwise land on the prompt line.
+    eprintln!();
+    match read {
+        // An empty answer is the user pressing Enter at the prompt: nothing to pass on, but not
+        // a cancel either.
+        SecretPrompt::Value(v) if v.is_empty() => SecretPrompt::None,
+        other => other,
+    }
+}
+
+/// Read the answer from a terminal with echo off, one key event at a time.
+///
+/// Nothing is echoed, so there is no cursor to maintain: Backspace simply drops the last
+/// character. Esc, Ctrl-C and Ctrl-D cancel — in raw mode none of the three reaches the
+/// terminal driver, so each one has to be handled as an ordinary key press.
+fn read_code_hidden() -> SecretPrompt {
+    use ratatui::crossterm::event::{self, Event, KeyEventKind};
+    use ratatui::crossterm::terminal::enable_raw_mode;
+
+    // A terminal that won't go into raw mode is one this can't read from safely; the connect
+    // goes ahead without an answer rather than pretending the user backed out.
+    if enable_raw_mode().is_err() {
+        return SecretPrompt::None;
+    }
+    let _cooked = CookedMode;
+    // Sized up front, so a growing answer doesn't leave older copies of itself behind in
+    // reallocated buffers that nothing will zero.
+    let mut code = Zeroizing::new(String::with_capacity(128));
+    loop {
+        let Ok(event) = event::read() else {
+            return SecretPrompt::None;
+        };
+        let Event::Key(key) = event else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        match code_edit(key) {
+            CodeEdit::Push(c) => code.push(c),
+            CodeEdit::Backspace => {
+                code.pop();
+            }
+            CodeEdit::Accept => return SecretPrompt::Value(code),
+            CodeEdit::Cancel => return SecretPrompt::Cancelled,
+            CodeEdit::Ignore => {}
+        }
+    }
+}
+
+/// The piped fallback: a script feeds the answer on stdin, where there is no echo to turn off.
+/// EOF with nothing typed is the pipe running dry, not a user backing out, so it connects
+/// without an answer exactly as it did before.
+fn read_code_piped(tidy: fn(&str) -> &str) -> SecretPrompt {
+    let mut line = Zeroizing::new(String::new());
+    match std::io::stdin().read_line(&mut line) {
+        Ok(n) if n > 0 => SecretPrompt::Value(Zeroizing::new(tidy(&line).to_string())),
+        _ => SecretPrompt::None,
+    }
+}
+
+/// The fifth hard invariant in miniature: raw mode is undone however the read ends — a return,
+/// an unreadable event, or a panic unwinding through it — so the terminal is never left with
+/// echo off.
+struct CookedMode;
+
+impl Drop for CookedMode {
+    fn drop(&mut self) {
+        let _ = ratatui::crossterm::terminal::disable_raw_mode();
+    }
+}
+
+/// What one key press does to the code being typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodeEdit {
+    /// Append this character.
+    Push(char),
+    /// Drop the last character.
+    Backspace,
+    /// Enter — the code is complete.
+    Accept,
+    /// Esc, Ctrl-C or Ctrl-D — back out; nothing connects.
+    Cancel,
+    /// Arrows, function keys, other chords: no effect.
+    Ignore,
+}
+
+/// Map a key press to its edit. Split out of [`read_code_hidden`] so the editing rules are
+/// testable without a terminal; the reader around them is verified by hand.
+///
+/// Chords other than Ctrl-C and Ctrl-D are ignored rather than typed, so a reflexive Ctrl-v
+/// can't end up inside the code. Shift is not a chord — it's how an uppercase character
+/// arrives.
+fn code_edit(key: KeyEvent) -> CodeEdit {
+    match key.code {
+        KeyCode::Enter => CodeEdit::Accept,
+        KeyCode::Esc => CodeEdit::Cancel,
+        // Ctrl-C is the interrupt raw mode swallowed; Ctrl-D is the EOF the old `read_line`
+        // answered. Both have to end the prompt, or it hangs with no way out.
+        KeyCode::Char('c' | 'd') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            CodeEdit::Cancel
+        }
+        KeyCode::Backspace => CodeEdit::Backspace,
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            CodeEdit::Push(c)
+        }
+        _ => CodeEdit::Ignore,
+    }
+}
+
+/// Find a host by exact name or id.
+fn resolve_host<'a>(hosts: &'a [Host], reference: &str) -> Option<&'a Host> {
+    hosts
+        .iter()
+        .find(|h| h.name == reference || h.id == reference)
+}
+
+/// The id of the most-recently-used host, if any.
+fn last_used_id(state: &FrecencyState) -> Option<String> {
+    state
+        .stats
+        .iter()
+        .max_by_key(|(_, s)| s.last_used)
+        .map(|(id, _)| id.clone())
+}
+
+/// Completion candidates for a host-name argument: each saved host's name, with its endpoint
+/// as the description. Best-effort and side-effect-free (any error → no candidates).
+fn host_name_candidates() -> Vec<CompletionCandidate> {
+    let Ok(paths) = Paths::resolve() else {
+        return Vec::new();
+    };
+    let Ok(cfg) = Config::load(&paths.config_file()) else {
+        return Vec::new();
+    };
+    match store::load_hosts(&cfg.hosts_path(&paths)) {
+        Ok(file) => host_candidates_from(&file.hosts, &file.sites),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The shell writes the description straight to the terminal, so the help text is sanitized.
+/// The candidate **value** is not: it is what the shell inserts on the command line and what
+/// `ssh-manager <name>` then has to resolve, so it stays exactly as stored — mangling it would
+/// complete to a name no host has, the machine-readable half of the same rule that leaves
+/// `--json` alone.
+fn host_candidates_from(hosts: &[Host], sites: &[Site]) -> Vec<CompletionCandidate> {
+    hosts
+        .iter()
+        .map(|h| {
+            CompletionCandidate::new(&h.name)
+                .help(Some(display::sanitize(&h.endpoint_in(sites)).into()))
+        })
+        .collect()
+}
+
+/// Completion candidates for a `--site` argument: each defined site's name. Best-effort.
+/// Dynamic completion for `--credential` and `ssh-manager credentials bind`: every name declared in
+/// the table plus every name a host already points at, so an undeclared one still completes.
+fn credential_name_candidates() -> Vec<CompletionCandidate> {
+    let Ok(paths) = Paths::resolve() else {
+        return Vec::new();
+    };
+    let Ok(cfg) = Config::load(&paths.config_file()) else {
+        return Vec::new();
+    };
+    match store::load_hosts(&cfg.hosts_path(&paths)) {
+        Ok(file) => {
+            let mut names: Vec<String> = file.credentials.iter().map(|c| c.name.clone()).collect();
+            for name in file.undeclared_credentials() {
+                names.push(name);
+            }
+            names.iter().map(CompletionCandidate::new).collect()
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+fn site_name_candidates() -> Vec<CompletionCandidate> {
+    let Ok(paths) = Paths::resolve() else {
+        return Vec::new();
+    };
+    let Ok(cfg) = Config::load(&paths.config_file()) else {
+        return Vec::new();
+    };
+    match store::load_hosts(&cfg.hosts_path(&paths)) {
+        Ok(file) => file
+            .sites
+            .iter()
+            // As stored: the value is what `--site` has to match (see `host_candidates_from`).
+            .map(|s| CompletionCandidate::new(&s.name))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn cli_routes_host_vs_subcommand() {
+        // A known subcommand name wins.
+        let c = Cli::try_parse_from(["ssh-manager", "list"]).unwrap();
+        assert!(matches!(c.command, Some(Command::List { .. })));
+        assert!(c.host.is_none());
+
+        // `add` is a subcommand, not a host called "add".
+        let c = Cli::try_parse_from(["ssh-manager", "add"]).unwrap();
+        assert!(matches!(c.command, Some(Command::Add(_))));
+        assert!(c.host.is_none());
+
+        // A bare, unknown token is the host positional → direct connect.
+        let c = Cli::try_parse_from(["ssh-manager", "prod-web"]).unwrap();
+        assert!(c.command.is_none());
+        assert_eq!(c.host.as_deref(), Some("prod-web"));
+
+        // Nothing → TUI.
+        let c = Cli::try_parse_from(["ssh-manager"]).unwrap();
+        assert!(c.command.is_none() && c.host.is_none());
+    }
+
+    /// The regression this replaced `args_conflicts_with_subcommands` to fix: the **global**
+    /// flags must work on either side of a subcommand, as `docs/cli.md` documents.
+    #[test]
+    fn global_flags_work_before_and_after_a_subcommand() {
+        for argv in [
+            vec!["ssh-manager", "--config", "/tmp/x.toml", "list"],
+            vec!["ssh-manager", "list", "--config", "/tmp/x.toml"],
+        ] {
+            let c = Cli::try_parse_from(&argv).expect("--config is a global flag");
+            assert!(matches!(c.command, Some(Command::List { .. })), "{argv:?}");
+            assert_eq!(
+                c.config.as_deref(),
+                Some(std::path::Path::new("/tmp/x.toml"))
+            );
+            assert!(c.host.is_none(), "{argv:?} must not be read as a host name");
+        }
+        // Previously a hard parse error, and the reason `ssh-manager --config F doctor` was unusable.
+        let c = Cli::try_parse_from(["ssh-manager", "--config", "/tmp/x.toml", "doctor"]).unwrap();
+        assert!(matches!(c.command, Some(Command::Doctor)));
+        let c = Cli::try_parse_from(["ssh-manager", "--config", "/tmp/x.toml", "set-password", "web"])
+            .unwrap();
+        assert!(matches!(c.command, Some(Command::SetPassword { .. })));
+        // …and the same for the other global flag.
+        let c = Cli::try_parse_from(["ssh-manager", "--transfer-log", "/tmp/t.log", "list"]).unwrap();
+        assert!(matches!(c.command, Some(Command::List { .. })));
+        assert_eq!(
+            c.transfer_log.as_deref(),
+            Some(std::path::Path::new("/tmp/t.log"))
+        );
+    }
+
+    #[test]
+    fn a_host_and_a_subcommand_together_are_refused_not_silently_resolved() {
+        // clap parses both happily; dispatch would run the subcommand and drop the host, so the
+        // combination is rejected explicitly instead.
+        let c = Cli::try_parse_from(["ssh-manager", "prod-web", "list"]).unwrap();
+        assert_eq!(c.host.as_deref(), Some("prod-web"));
+        assert!(c.command.is_some());
+        let err = reject_host_with_subcommand(c.host.as_deref(), c.command.as_ref())
+            .expect_err("a host plus a subcommand is always a mistake")
+            .to_string();
+        assert!(err.contains("prod-web"), "{err}");
+        assert!(err.contains("'list' is a subcommand"), "{err}");
+        assert!(err.contains("`ssh-manager prod-web` connects"), "{err}");
+
+        // Either alone is fine.
+        assert!(reject_host_with_subcommand(Some("prod-web"), None).is_ok());
+        let c = Cli::try_parse_from(["ssh-manager", "list"]).unwrap();
+        assert!(reject_host_with_subcommand(None, c.command.as_ref()).is_ok());
+        assert!(reject_host_with_subcommand(None, None).is_ok());
+    }
+
+    #[test]
+    fn every_subcommand_reports_its_own_name() {
+        for (argv, expected) in [
+            (vec!["ssh-manager", "list"], "list"),
+            (vec!["ssh-manager", "add"], "add"),
+            (vec!["ssh-manager", "import"], "import"),
+            (vec!["ssh-manager", "export"], "export"),
+            (vec!["ssh-manager", "set-password", "web"], "set-password"),
+            (vec!["ssh-manager", "print-command", "web"], "print-command"),
+            (vec!["ssh-manager", "sites"], "sites"),
+            (vec!["ssh-manager", "doctor"], "doctor"),
+            (vec!["ssh-manager", "completions", "bash"], "completions"),
+            (vec!["ssh-manager", "man"], "man"),
+        ] {
+            let c = Cli::try_parse_from(&argv).unwrap();
+            assert_eq!(c.command.as_ref().unwrap().name(), expected, "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn dash_parses_as_host_for_reconnect() {
+        let c = Cli::try_parse_from(["ssh-manager", "-"]).unwrap();
+        assert_eq!(c.host.as_deref(), Some("-"));
+        assert!(c.command.is_none());
+    }
+
+    #[test]
+    fn list_query_and_json_flag() {
+        let c = Cli::try_parse_from(["ssh-manager", "list", "--json", "tag:web", "staging"]).unwrap();
+        match c.command {
+            Some(Command::List { query, json }) => {
+                assert!(json);
+                assert_eq!(query, vec!["tag:web", "staging"]);
+            }
+            _ => panic!("expected the list subcommand"),
+        }
+    }
+
+    #[test]
+    fn print_command_captures_host() {
+        let c = Cli::try_parse_from(["ssh-manager", "print-command", "prod-web"]).unwrap();
+        match c.command {
+            Some(Command::Print { host }) => assert_eq!(host, "prod-web"),
+            _ => panic!("expected the print-command subcommand"),
+        }
+    }
+
+    #[test]
+    fn import_defaults_to_ssh_config_and_opts_into_tailscale() {
+        let c = Cli::try_parse_from(["ssh-manager", "import"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Some(Command::Import {
+                dry_run: false,
+                tailscale: false
+            })
+        ));
+        let c = Cli::try_parse_from(["ssh-manager", "import", "--tailscale", "--dry-run"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Some(Command::Import {
+                dry_run: true,
+                tailscale: true
+            })
+        ));
+    }
+
+    #[test]
+    fn doctor_parses_as_a_bare_subcommand() {
+        let c = Cli::try_parse_from(["ssh-manager", "doctor"]).unwrap();
+        assert!(matches!(c.command, Some(Command::Doctor)));
+        assert!(c.host.is_none());
+        // No flags in this release — `--json` is deliberately absent (D-027).
+        assert!(Cli::try_parse_from(["ssh-manager", "doctor", "--json"]).is_err());
+    }
+
+    #[test]
+    fn export_parses_with_and_without_stdout() {
+        let c = Cli::try_parse_from(["ssh-manager", "export"]).unwrap();
+        assert!(matches!(c.command, Some(Command::Export { stdout: false })));
+        let c = Cli::try_parse_from(["ssh-manager", "export", "--stdout"]).unwrap();
+        assert!(matches!(c.command, Some(Command::Export { stdout: true })));
+    }
+
+    #[test]
+    fn add_alone_opens_the_tui() {
+        let c = Cli::try_parse_from(["ssh-manager", "add"]).unwrap();
+        match c.command {
+            Some(Command::Add(a)) => assert!(!a.has_args()),
+            _ => panic!("expected add"),
+        }
+    }
+
+    #[test]
+    fn add_with_flags_builds_a_host() {
+        let c = Cli::try_parse_from([
+            "ssh-manager",
+            "add",
+            "prod-db",
+            "-H",
+            "10.0.0.2",
+            "-u",
+            "mike",
+            "-p",
+            "5432",
+            "-i",
+            "~/.ssh/k",
+            "-J",
+            "bastion",
+            "-t",
+            "prod,db",
+            "--extra",
+            "-o BatchMode=yes",
+        ])
+        .unwrap();
+        let args = match c.command {
+            Some(Command::Add(a)) => a,
+            _ => panic!("expected add"),
+        };
+        assert!(args.has_args());
+        let h = args.into_host().unwrap();
+        assert_eq!(h.name, "prod-db");
+        assert_eq!(h.hostname, "10.0.0.2");
+        assert_eq!(h.user.as_deref(), Some("mike"));
+        assert_eq!(h.port, Some(5432));
+        assert_eq!(h.auth, AuthMethod::Key); // inferred from --identity
+        assert_eq!(h.identity_files, vec!["~/.ssh/k".to_string()]);
+        assert_eq!(h.jump_hosts, vec!["bastion".to_string()]);
+        assert_eq!(h.tags, vec!["prod".to_string(), "db".to_string()]); // comma split
+        assert_eq!(h.extra_args.as_deref(), Some("-o BatchMode=yes"));
+    }
+
+    #[test]
+    fn add_requires_name_and_hostname() {
+        let c = Cli::try_parse_from(["ssh-manager", "add", "--hostname", "h"]).unwrap();
+        let args = match c.command {
+            Some(Command::Add(a)) => a,
+            _ => panic!("expected add"),
+        };
+        assert!(args.has_args());
+        assert!(args.into_host().is_err()); // missing NAME
+    }
+
+    #[test]
+    fn add_password_stdin_infers_password_auth() {
+        let c =
+            Cli::try_parse_from(["ssh-manager", "add", "box", "-H", "h", "--password-stdin"]).unwrap();
+        match c.command {
+            Some(Command::Add(a)) => assert_eq!(a.resolved_auth(), AuthMethod::Password),
+            _ => panic!("expected add"),
+        }
+    }
+
+    fn add_args(argv: &[&str]) -> AddArgs {
+        match Cli::try_parse_from(argv).unwrap().command {
+            Some(Command::Add(a)) => a,
+            _ => panic!("expected add"),
+        }
+    }
+
+    #[test]
+    fn add_routes_between_the_form_flags_and_from_ssh() {
+        let route = |argv: &[&str]| {
+            let a = add_args(argv);
+            (a.has_args(), a.route().map_err(|e| e.to_string()))
+        };
+        assert_eq!(route(&["ssh-manager", "add"]), (false, Ok(AddRoute::Form)));
+        assert_eq!(
+            route(&["ssh-manager", "add", "web", "-H", "h"]),
+            (true, Ok(AddRoute::Flags))
+        );
+        for argv in [
+            &["ssh-manager", "add", "--from-ssh", "ssh u@h"][..],
+            &["ssh-manager", "add", "--from-ssh"],
+            &["ssh-manager", "add", "--from-ssh", "-"],
+            &["ssh-manager", "add", "web", "--from-ssh", "ssh u@h", "--quiet"],
+        ] {
+            assert_eq!(route(argv), (true, Ok(AddRoute::FromSsh)), "{argv:?}");
+        }
+        for argv in [
+            &["ssh-manager", "add", "-q"][..],
+            &["ssh-manager", "add", "web", "-H", "h", "--quiet"],
+        ] {
+            assert_eq!(
+                route(argv).1,
+                Err("--quiet only applies to --from-ssh".to_string()),
+                "{argv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_ssh_takes_a_value_or_stdin_and_composes_with_the_rest() {
+        assert_eq!(
+            add_args(&["ssh-manager", "add", "--from-ssh", "ssh -p 2222 u@h"]).from_ssh,
+            Some(Some("ssh -p 2222 u@h".to_string()))
+        );
+        assert_eq!(
+            add_args(&["ssh-manager", "add", "--from-ssh"]).from_ssh,
+            Some(None)
+        );
+        assert_eq!(
+            add_args(&["ssh-manager", "add", "--from-ssh", "-"]).from_ssh,
+            Some(Some("-".to_string()))
+        );
+        let a = add_args(&[
+            "ssh-manager",
+            "add",
+            "prod-web",
+            "--from-ssh",
+            "ssh u@h",
+            "--tag",
+            "prod,web",
+            "--site",
+            "dc1",
+            "--2fa",
+            "--password-stdin",
+            "-q",
+        ]);
+        assert_eq!(a.name.as_deref(), Some("prod-web"));
+        assert_eq!(a.tags, vec!["prod", "web"]);
+        assert_eq!(a.site.as_deref(), Some("dc1"));
+        assert!(a.requires_2fa && a.password_stdin && a.quiet);
+    }
+
+    #[test]
+    fn from_ssh_conflicts_with_every_field_the_line_supplies() {
+        for (flag, value) in [
+            ("--hostname", "h"),
+            ("--user", "u"),
+            ("--port", "22"),
+            ("--auth", "key"),
+            ("--identity", "k"),
+            ("--jump", "b"),
+            ("--extra", "-A"),
+        ] {
+            let e = Cli::try_parse_from(["ssh-manager", "add", "--from-ssh", "ssh u@h", flag, value])
+                .err()
+                .unwrap_or_else(|| panic!("--from-ssh with {flag} must be refused"));
+            assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict, "{flag}");
+            let note = conflict_note(&e).expect("the conflict explains itself");
+            assert!(note.contains("already supplies"), "{note}");
+        }
+        // Other parse errors get no note.
+        let e = Cli::try_parse_from(["ssh-manager", "add", "--port", "nope"])
+            .err()
+            .unwrap();
+        assert!(conflict_note(&e).is_none());
+    }
+
+    #[test]
+    fn a_login_endpoint_shows_the_port_only_when_it_matters() {
+        let mut h = Host::new("web", "44.196.235.116");
+        h.user = Some("ubuntu".into());
+        assert_eq!(login_endpoint(&h), "ubuntu@44.196.235.116");
+        h.port = Some(22);
+        assert_eq!(login_endpoint(&h), "ubuntu@44.196.235.116");
+        h.port = Some(2222);
+        assert_eq!(login_endpoint(&h), "ubuntu@44.196.235.116:2222");
+    }
+
+    #[test]
+    fn global_config_works_with_a_host() {
+        let c = Cli::try_parse_from(["ssh-manager", "--config", "/tmp/x.toml", "prod-web"]).unwrap();
+        assert_eq!(c.host.as_deref(), Some("prod-web"));
+        assert_eq!(
+            c.config.as_deref(),
+            Some(std::path::Path::new("/tmp/x.toml"))
+        );
+    }
+
+    #[test]
+    fn resolve_host_by_name_and_id() {
+        let mut h = Host::new("prod-web", "10.0.0.1");
+        h.id = "abc123".into();
+        let hosts = vec![h];
+        assert!(resolve_host(&hosts, "prod-web").is_some());
+        assert!(resolve_host(&hosts, "abc123").is_some());
+        assert!(resolve_host(&hosts, "missing").is_none());
+    }
+
+    #[test]
+    fn last_used_id_picks_most_recent() {
+        let mut st = FrecencyState::default();
+        st.stats.insert(
+            "old".into(),
+            crate::state::HostStat {
+                use_count: 9,
+                last_used: 100,
+            },
+        );
+        st.stats.insert(
+            "new".into(),
+            crate::state::HostStat {
+                use_count: 1,
+                last_used: 200,
+            },
+        );
+        assert_eq!(last_used_id(&st).as_deref(), Some("new"));
+        assert!(last_used_id(&FrecencyState::default()).is_none());
+    }
+
+    #[test]
+    fn json_output_has_fields_and_command() {
+        let mut h = Host::new("web", "10.0.0.1");
+        h.user = Some("root".into());
+        let refs = vec![&h];
+        let j = hosts_to_json(&refs, &[]).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&j).unwrap();
+        assert!(parsed.is_array());
+        assert_eq!(parsed[0]["name"], "web");
+        assert_eq!(parsed[0]["hostname"], "10.0.0.1");
+        assert!(
+            parsed[0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("root@10.0.0.1")
+        );
+    }
+
+    #[test]
+    fn host_candidates_from_lists_each_name() {
+        let hosts = vec![Host::new("a", "h1"), Host::new("b", "h2")];
+        assert_eq!(host_candidates_from(&hosts, &[]).len(), 2);
+    }
+
+    /// Issue #16: plain `ssh-manager list` prints the user a host inherits from its site, while
+    /// `--json` keeps flattening the record exactly as stored (`user` stays `null`).
+    #[test]
+    fn list_row_shows_the_inherited_site_user_but_json_keeps_the_record() {
+        let sites = vec![Site {
+            name: "dc".into(),
+            user: Some("deploy".into()),
+            port: None,
+            jump_hosts: Vec::new(),
+            identity_files: Vec::new(),
+        }];
+        let mut inherits = Host::new("web1", "10.0.0.1");
+        inherits.site = Some("dc".into());
+        let mut own = Host::new("web2", "10.0.0.2");
+        own.site = Some("dc".into());
+        own.user = Some("mike".into());
+
+        let row = list_row(&inherits, &sites);
+        assert!(row.contains("deploy@10.0.0.1:22"), "{row}");
+        assert!(row.contains("·dc·"), "{row}");
+        assert!(list_row(&own, &sites).contains("mike@10.0.0.2:22"));
+        // Completion help text resolves the same way.
+        let help = host_candidates_from(&[inherits.clone()], &sites);
+        assert_eq!(
+            help[0].get_help().unwrap().to_string(),
+            "deploy@10.0.0.1:22"
+        );
+
+        // The JSON contract is unchanged: the record is as stored, only `command` resolves.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&hosts_to_json(&[&inherits], &sites).unwrap()).unwrap();
+        assert!(parsed[0]["user"].is_null());
+        assert!(
+            parsed[0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("deploy@10.0.0.1")
+        );
+    }
+
+    /// L-02: a crafted `hosts.toml` can't move the cursor through `ssh-manager list`, while the
+    /// JSON contract keeps handing scripts the value exactly as it is stored.
+    #[test]
+    fn a_crafted_host_is_neutralised_in_the_plain_row_but_not_in_json() {
+        let crafted = "web\u{1b}[2J\u{202e}";
+        let mut h = Host::new(crafted, "10.0.0.1\u{9b}6n");
+        h.tags = vec!["prod\u{85}".into()];
+        h.site = Some("dc\u{1b}[31m".into());
+
+        let row = list_row(&h, &[]);
+        for bad in ['\u{1b}', '\u{9b}', '\u{85}', '\u{202e}'] {
+            assert!(!row.contains(bad), "{bad:?} survived into {row:?}");
+        }
+        assert!(row.contains('\u{fffd}'), "{row:?}");
+        // The row is still a row: the readable text around the escapes is untouched.
+        assert!(row.contains("web"), "{row:?}");
+        assert!(row.contains("agent"), "{row:?}");
+
+        // Completion help is written to the terminal by the shell, so it's sanitized too —
+        // but the candidate *value* is what the shell types back, so it stays as stored.
+        let candidates = host_candidates_from(std::slice::from_ref(&h), &[]);
+        let help = candidates[0].get_help().unwrap().to_string();
+        assert!(!help.contains('\u{1b}'), "{help:?}");
+        assert_eq!(candidates[0].get_value(), std::ffi::OsStr::new(crafted));
+
+        // …and the machine-readable path is byte-for-byte what was stored.
+        let json = hosts_to_json(&[&h], &[]).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed[0]["name"], crafted);
+        assert_eq!(parsed[0]["hostname"], "10.0.0.1\u{9b}6n");
+        assert!(
+            !json.contains('\u{1b}'),
+            "the serializer escapes it on the way out: {json}"
+        );
+    }
+
+    /// L-07: the editing rules of the CLI's echo-off 2FA reader, without a terminal.
+    #[test]
+    fn typing_a_verification_code_maps_keys_to_edits() {
+        let plain = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        assert_eq!(code_edit(plain(KeyCode::Char('4'))), CodeEdit::Push('4'));
+        assert_eq!(code_edit(plain(KeyCode::Backspace)), CodeEdit::Backspace);
+        assert_eq!(code_edit(plain(KeyCode::Enter)), CodeEdit::Accept);
+        assert_eq!(code_edit(plain(KeyCode::Esc)), CodeEdit::Cancel);
+        // In raw mode Ctrl-C is a key press, not a signal — it has to cancel by hand.
+        assert_eq!(
+            code_edit(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            CodeEdit::Cancel
+        );
+        // Ctrl-D is the EOF the old `read_line` answered; raw mode swallows it, so it has to
+        // cancel by hand or the prompt has no way out.
+        assert_eq!(
+            code_edit(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)),
+            CodeEdit::Cancel
+        );
+        // Other chords and navigation keys don't end up inside the code.
+        assert_eq!(
+            code_edit(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)),
+            CodeEdit::Ignore
+        );
+        assert_eq!(code_edit(plain(KeyCode::Left)), CodeEdit::Ignore);
+        // Shift is not a chord: it is how an uppercase character arrives.
+        assert_eq!(
+            code_edit(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+            CodeEdit::Push('A')
+        );
+    }
+
+    #[test]
+    fn add_parses_site_flag_and_sets_it() {
+        let c = Cli::try_parse_from([
+            "ssh-manager", "add", "web", "-H", "10.0.0.1", "--site", "prod-dc",
+        ])
+        .unwrap();
+        match c.command {
+            Some(Command::Add(a)) => {
+                assert_eq!(a.site.as_deref(), Some("prod-dc"));
+                assert!(a.has_args());
+                assert_eq!(a.into_host().unwrap().site.as_deref(), Some("prod-dc"));
+            }
+            _ => panic!("expected add"),
+        }
+    }
+
+    #[test]
+    fn sites_subcommand_parses() {
+        let c = Cli::try_parse_from(["ssh-manager", "sites"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Some(Command::Sites { action: None, .. })
+        ));
+
+        let c = Cli::try_parse_from([
+            "ssh-manager", "sites", "add", "dc1", "-u", "deploy", "-J", "b1,b2",
+        ])
+        .unwrap();
+        match c.command {
+            Some(Command::Sites {
+                json: _,
+                action:
+                    Some(SitesAction::Add {
+                        name,
+                        user,
+                        jump_hosts,
+                        ..
+                    }),
+            }) => {
+                assert_eq!(name, "dc1");
+                assert_eq!(user.as_deref(), Some("deploy"));
+                assert_eq!(jump_hosts, vec!["b1", "b2"]);
+            }
+            _ => panic!("expected sites add"),
+        }
+    }
+}

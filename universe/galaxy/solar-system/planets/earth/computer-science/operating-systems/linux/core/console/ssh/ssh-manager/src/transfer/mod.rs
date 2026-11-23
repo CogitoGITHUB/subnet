@@ -1,0 +1,397 @@
+//! Transfer engine core: the command lines for the dual-pane file-transfer screen, plus the
+//! worker/UI message protocol and progress math.
+//!
+//! Transport model (validated by the M0 spike — see `docs/decisions.md`): authenticate ONCE by
+//! opening a backgrounded `ssh` ControlMaster, which reuses *every* part of ssh-manager's auth via
+//! [`crate::ssh::build_args`] + `SSH_ASKPASS` (keys, agent, ProxyJump, port, and the stored
+//! keyring/vault secret). `sftp` then rides that master with only `-o ControlPath`, so there is
+//! no re-auth and no per-file password prompt. Because the ride commands inherit the connection
+//! from the master, they need NONE of `-p`/`-i`/`-J`. Transfers use `sftp` `get`/`put` (not
+//! `scp`): `sftp` quotes paths via its own parser consistently across OpenSSH versions.
+#[cfg(test)]
+mod e2e;
+mod pane;
+mod screen;
+mod worker;
+
+pub use pane::{Pane, Side};
+// Part of `Pane::set_entries`' signature; named directly only by the renderer's tests.
+#[cfg_attr(not(test), allow(unused_imports))]
+pub use pane::PaneEntry;
+pub use screen::{TransferOutcome, TransferScreen};
+
+use std::path::{Path, PathBuf};
+
+use crate::model::Host;
+
+/// Env var (also set by `--transfer-log <FILE>`) naming a file the worker appends transfer
+/// diagnostics to: the `ssh` and `sftp` commands it runs, the local and remote paths they touch,
+/// their stderr, and every value the host's `extra_args` contributes. None of that is a secret —
+/// a stored password reaches `ssh` via `SSH_ASKPASS` and never appears in argv, so it is never
+/// logged — but together it describes the connection in full, so point this somewhere private.
+/// The worker opens the file `0600` and refuses to follow a symlink at that path.
+pub(crate) const LOG_ENV: &str = "SSH_MANAGER_TRANSFER_LOG";
+
+/// Direction of a transfer, named by where the bytes end up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// local → remote
+    Upload,
+    /// remote → local
+    Download,
+}
+
+/// The `user@host` destination shared by the master and the `sftp` ride commands.
+pub fn target(host: &Host) -> String {
+    format!("{}@{}", host.effective_user(), host.hostname)
+}
+
+/// `ssh` argv that opens a backgrounded ControlMaster for `host`, held by the worker thread.
+/// `-N` holds the connection without a remote command; the master is created at `control_path`
+/// and [`crate::ssh::build_args`] is reused verbatim so keys/agent/ProxyJump/port and the
+/// stored secret (via `SSH_ASKPASS`, wired by the caller) all apply exactly as on connect.
+pub fn master_args(host: &Host, control_path: &Path, askpass: bool) -> Vec<String> {
+    let mut a = vec![
+        "-N".to_string(),
+        "-o".to_string(),
+        "ControlMaster=yes".to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}", control_path.display()),
+    ];
+    a.extend(crate::ssh::no_prompt_args(askpass));
+    a.extend(crate::ssh::build_args(host, true, askpass));
+    a
+}
+
+/// `ssh -O check` argv — ask whether the master is alive (worker readiness poll).
+pub fn master_check_args(control_path: &Path, target: &str) -> Vec<String> {
+    control_op_args("check", control_path, target)
+}
+
+/// `ssh -O exit` argv — tell the master to close (teardown).
+pub fn master_exit_args(control_path: &Path, target: &str) -> Vec<String> {
+    control_op_args("exit", control_path, target)
+}
+
+fn control_op_args(op: &str, control_path: &Path, target: &str) -> Vec<String> {
+    vec![
+        "-O".to_string(),
+        op.to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}", control_path.display()),
+        target.to_string(),
+    ]
+}
+
+/// `sftp -b -` argv that rides the master — the worker feeds `ls`/`get`/`put` batch lines on
+/// stdin. Only `-o ControlPath` + the destination: the master carries auth/port.
+pub fn sftp_batch_args(control_path: &Path, target: &str) -> Vec<String> {
+    vec![
+        "-b".to_string(),
+        "-".to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}", control_path.display()),
+        target.to_string(),
+    ]
+}
+
+/// Quote `s` for `sftp`'s command parser (used in `ls`/`get`/`put` batch lines). Falls back to
+/// the raw string only if it contains a NUL, which can't appear in a path anyway. Transfers go
+/// through `sftp` rather than `scp` precisely so this one quoting rule applies on every OpenSSH
+/// version — `scp`'s remote-path handling changed in OpenSSH 9 and takes shell quoting literally.
+pub(crate) fn shell_quote(s: &str) -> std::borrow::Cow<'_, str> {
+    shlex::try_quote(s).unwrap_or(std::borrow::Cow::Borrowed(s))
+}
+
+/// Live transfer progress: bytes moved so far out of the total. `bytes_total` is `0` until the
+/// size is known (the UI shows an indeterminate state then).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Progress {
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+impl Progress {
+    /// Completion as a whole percentage `0..=100`; `0` when the total isn't known yet.
+    pub fn percent(&self) -> u16 {
+        if self.bytes_total == 0 {
+            return 0;
+        }
+        let pct = self.bytes_done.saturating_mul(100) / self.bytes_total;
+        pct.min(100) as u16
+    }
+}
+
+/// A remote directory entry, parsed from `sftp`'s `ls -lan` output by the worker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub size: u64,
+}
+
+/// One transfer task: move `src` (a file or directory) into the other side's `dest_dir`.
+pub struct TransferJob {
+    pub direction: Direction,
+    /// Absolute path of the item to move, on the source side.
+    pub src: PathBuf,
+    /// Absolute directory on the destination side to drop it into.
+    pub dest_dir: PathBuf,
+    /// `src` is a directory (transfer recursively).
+    pub recursive: bool,
+    /// Total bytes, when known (a single file's size), for the progress bar; `0` = indeterminate.
+    pub size_hint: u64,
+}
+
+/// A request from the UI thread to the transfer worker.
+pub enum WorkerCmd {
+    /// List the remote directory at this absolute path.
+    ListRemote(PathBuf),
+    /// Run a transfer.
+    Transfer(TransferJob),
+    /// Create one remote directory at this absolute path (never its parents — see D-026).
+    Mkdir(PathBuf),
+    /// Cancel the in-flight transfer (if any).
+    Cancel,
+    /// Tear the master down and stop the worker.
+    Shutdown,
+}
+
+/// An event from the worker back to the UI, drained on each event-loop tick.
+pub enum WorkerEvent {
+    /// The master connection finished opening — `Ok(home)` carries the remote working directory
+    /// to start browsing from, `Err(msg)` reports why it failed.
+    Ready(Result<PathBuf, String>),
+    /// A remote-directory listing completed. `truncated` says the worker stopped short of the
+    /// whole directory — the screen has to say so rather than show a partial listing as whole.
+    Listing {
+        path: PathBuf,
+        entries: Vec<RemoteEntry>,
+        truncated: bool,
+    },
+    /// Progress on the in-flight transfer.
+    Progress(Progress),
+    /// The in-flight transfer completed successfully.
+    Done,
+    /// The transfer was passed over rather than run: the destination name appeared between the
+    /// screen's listing check and the moment the download was installed, and v1 never
+    /// overwrites. Carries the entry's name, so the screen reports it exactly as its own check
+    /// would — a skip, not a failure, so a batch send carries on.
+    Skipped(String),
+    /// The in-flight transfer was cancelled at the UI's request and is fully torn down. The
+    /// screen needs this to leave its "transfer running" state (Esc would otherwise strand it).
+    Cancelled,
+    /// A remote `mkdir` finished — `Ok(path)` names the new directory, `Err(msg)` says why not.
+    MkdirDone(Result<PathBuf, String>),
+    /// A listing or transfer failed; message is safe to show to the user.
+    Error(String),
+}
+
+/// Validate a name typed into the "new directory" input.
+///
+/// The input creates exactly **one** directory inside the pane's current directory, so a name
+/// carrying a path is a mistake, not a shortcut (D-026). Control characters are refused because
+/// the listing strips them for display — a name you can't see is a name you can't manage.
+pub(crate) fn validate_dir_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("no name typed — enter a directory name, or esc to cancel".to_string());
+    }
+    if name.contains('/') {
+        return Err(format!(
+            "\"{name}\" contains \"/\" — this creates one directory here, not a path"
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(format!(
+            "\"{}\" contains a control character — use plain text",
+            name.chars().filter(|c| !c.is_control()).collect::<String>()
+        ));
+    }
+    if name == "." || name == ".." {
+        return Err(format!(
+            "\"{name}\" is this directory's own entry — pick another name"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{AuthMethod, Host};
+    use std::path::Path;
+
+    fn host() -> Host {
+        let mut h = Host::new("web", "10.0.0.1");
+        h.user = Some("deploy".into());
+        h
+    }
+
+    fn owned(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn target_is_user_at_host() {
+        assert_eq!(target(&host()), "deploy@10.0.0.1");
+    }
+
+    #[test]
+    fn master_args_open_a_controlmaster_and_reuse_build_args() {
+        let a = master_args(&host(), Path::new("/tmp/cm.sock"), false);
+        // Opens a master at our socket, holds the connection (`-N`)…
+        assert!(a.contains(&"-N".to_string()));
+        assert!(a.windows(2).any(|w| w == ["-o", "ControlMaster=yes"]));
+        assert!(a.iter().any(|s| s == "ControlPath=/tmp/cm.sock"));
+        // …and reuses build_args: the endpoint is last and StrictHostKeyChecking is carried.
+        assert_eq!(a.last().unwrap(), "deploy@10.0.0.1");
+        assert!(a.iter().any(|s| s == "StrictHostKeyChecking=accept-new"));
+    }
+
+    #[test]
+    fn master_carries_jump_hosts_so_transfers_ride_them() {
+        // A ProxyJump target works: the master opens through the jump (key/agent), and
+        // sftp/scp ride that one connection — no per-command jump setup.
+        let mut h = host();
+        h.jump_hosts = vec!["bastion".into()];
+        let a = master_args(&h, Path::new("/tmp/cm"), false);
+        let j = a.iter().position(|s| s == "-J").expect("jump flag present");
+        assert_eq!(a[j + 1], "bastion");
+    }
+
+    /// Issue #18: ssh-manager holds the terminal, and ssh asks for a passphrase on `/dev/tty`, not
+    /// stdin — so a master with nothing to supply used to park on a prompt painted over the TUI
+    /// that no keystroke could ever reach. It has to fail instead.
+    #[test]
+    fn a_master_with_no_secret_to_supply_can_never_stop_on_a_prompt() {
+        let a = master_args(&host(), Path::new("/tmp/cm"), false);
+        assert!(
+            a.windows(2).any(|w| w == ["-o", "BatchMode=yes"]),
+            "an unattended master must not be able to prompt: {a:?}"
+        );
+
+        // With the askpass helper wired there IS an answer for every prompt, and BatchMode would
+        // only get in its way.
+        let wired = master_args(&host(), Path::new("/tmp/cm"), true);
+        assert!(!wired.iter().any(|s| s == "BatchMode=yes"));
+    }
+
+    /// ssh keeps the first value it is given for an option, so ours has to be emitted ahead of
+    /// whatever the host's `extra_args` says.
+    #[test]
+    fn batch_mode_precedes_extra_args() {
+        let mut h = host();
+        h.extra_args = Some("-o BatchMode=no".into());
+        let a = master_args(&h, Path::new("/tmp/cm"), false);
+        let ours = a.iter().position(|s| s == "BatchMode=yes").expect("ours");
+        let theirs = a.iter().position(|s| s == "BatchMode=no").expect("theirs");
+        assert!(ours < theirs, "ssh-manager's BatchMode must win: {a:?}");
+    }
+
+    #[test]
+    fn password_host_master_has_no_identity_flag() {
+        // Password hosts carry no `-i`; the secret is supplied to the master via SSH_ASKPASS
+        // (wired by the caller through ssh::configure_askpass), exactly as for connect.
+        let mut h = host();
+        h.auth = AuthMethod::Password;
+        let a = master_args(&h, Path::new("/tmp/cm"), false);
+        assert!(!a.iter().any(|s| s == "-i"));
+        assert_eq!(a.last().unwrap(), "deploy@10.0.0.1");
+    }
+
+    #[test]
+    fn sftp_ride_command_carries_only_controlpath() {
+        // The master already holds port/identity/jump, so the ride command (used for listing
+        // and for get/put transfers) carries only the control socket + the destination.
+        let cp = Path::new("/tmp/cm.sock");
+        assert_eq!(
+            sftp_batch_args(cp, "deploy@10.0.0.1"),
+            owned(&[
+                "-b",
+                "-",
+                "-o",
+                "ControlPath=/tmp/cm.sock",
+                "deploy@10.0.0.1"
+            ])
+        );
+    }
+
+    #[test]
+    fn control_ops_target_the_socket() {
+        assert_eq!(
+            master_check_args(Path::new("/tmp/cm"), "deploy@h"),
+            owned(&["-O", "check", "-o", "ControlPath=/tmp/cm", "deploy@h"])
+        );
+        assert_eq!(
+            master_exit_args(Path::new("/tmp/cm"), "deploy@h")[1],
+            "exit"
+        );
+    }
+
+    #[test]
+    fn shell_quote_wraps_spaces_but_leaves_plain_paths() {
+        assert_eq!(
+            shell_quote("/srv/my data/app.log"),
+            "'/srv/my data/app.log'"
+        );
+        assert_eq!(shell_quote("/srv/app"), "/srv/app");
+    }
+
+    #[test]
+    fn dir_name_validation_rejects_paths_blanks_and_specials() {
+        assert!(validate_dir_name("releases").is_ok());
+        assert!(validate_dir_name("my notes").is_ok()); // spaces are fine; sftp quoting handles them
+        assert!(validate_dir_name(".hidden").is_ok());
+
+        assert!(validate_dir_name("").unwrap_err().contains("no name typed"));
+        assert!(validate_dir_name("a/b").unwrap_err().contains("not a path"));
+        assert!(
+            validate_dir_name("/abs")
+                .unwrap_err()
+                .contains("not a path")
+        );
+        assert!(
+            validate_dir_name("ev\u{1b}[2Jil")
+                .unwrap_err()
+                .contains("control character")
+        );
+        for dots in [".", ".."] {
+            assert!(
+                validate_dir_name(dots)
+                    .unwrap_err()
+                    .contains("pick another name")
+            );
+        }
+    }
+
+    #[test]
+    fn control_chars_are_stripped_from_the_validation_message() {
+        // The message is shown on the status line; echoing the raw name back would re-arm the
+        // escape sequence the listing is careful to strip.
+        let err = validate_dir_name("ev\u{1b}[2Jil").unwrap_err();
+        assert!(!err.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn progress_percent_clamps_and_handles_unknown_total() {
+        assert_eq!(Progress::default().percent(), 0);
+        assert_eq!(
+            Progress {
+                bytes_done: 50,
+                bytes_total: 200
+            }
+            .percent(),
+            25
+        );
+        // Never exceeds 100, even if a stat overshoots.
+        assert_eq!(
+            Progress {
+                bytes_done: 999,
+                bytes_total: 100
+            }
+            .percent(),
+            100
+        );
+    }
+}

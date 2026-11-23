@@ -1,0 +1,6 @@
+test mod-state
+level 2
+module editor/plugins/state.rkt
+call (state-command (string->path "/x/state"))
+expect result equals ("/x/state")
+expect seconds-under 20

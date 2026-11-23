@@ -1,0 +1,230 @@
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::ops::ControlFlow;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use gix::object::tree::diff::Change;
+use gix::revision::walk::Sorting;
+use gix::traverse::commit::simple::CommitTimeOrder;
+
+use crate::payload::{Body, HeatmapData, Payload};
+use crate::render::Shape;
+use crate::samples;
+use crate::time as t;
+
+use super::super::{FetchContext, FetchError, Fetcher, Safety};
+use super::{fail, open_repo, payload, repo_cache_key, text_body};
+
+const SHAPES: &[Shape] = &[Shape::Heatmap, Shape::Text];
+const WEEKS: usize = 52;
+const TOP_FILES: usize = 7;
+const MAX_COMMITS: usize = 500;
+
+/// Per-file churn over the last 52 weeks. Rows are the top 7 most-touched files (truncated path),
+/// columns are weeks (rightmost = this week), cell = commits in that week touching that file.
+/// `Text` emits a top-N summary `"src/main.rs (42), src/lib.rs (31), …"`.
+pub struct GitBlameHeatmap;
+
+#[async_trait]
+impl Fetcher for GitBlameHeatmap {
+    fn name(&self) -> &str {
+        "git_blame_heatmap"
+    }
+    fn safety(&self) -> Safety {
+        Safety::Safe
+    }
+    fn description(&self) -> &'static str {
+        "Per-file churn over the last 52 weeks: rows are the seven most-touched files, columns are weeks, cells are commit counts. Use it to spot hotspots; pair with `git_commits_activity` if you want overall cadence instead of per-file breakdown."
+    }
+    fn refresh_interval(&self) -> u64 {
+        60 * 30
+    }
+    fn shapes(&self) -> &[Shape] {
+        SHAPES
+    }
+    fn default_shape(&self) -> Shape {
+        Shape::Heatmap
+    }
+    fn cache_key(&self, ctx: &FetchContext) -> String {
+        repo_cache_key(self.name(), ctx)
+    }
+    fn sample_body(&self, shape: Shape) -> Option<Body> {
+        Some(match shape {
+            Shape::Heatmap => samples::heatmap_grid(5, 10),
+            Shape::Text => {
+                samples::text("src/main.rs (18), src/render/mod.rs (12), src/fetcher/mod.rs (9)")
+            }
+            _ => return None,
+        })
+    }
+    async fn fetch(&self, ctx: &FetchContext) -> Result<Payload, FetchError> {
+        let repo = open_repo()?;
+        let now = t::now_in(ctx.timezone.as_deref());
+        let churn = churn(&repo, now.date_naive(), *now.offset())?;
+        Ok(payload(render_body(
+            churn,
+            ctx.shape.unwrap_or(Shape::Heatmap),
+        )))
+    }
+}
+
+struct Churn {
+    files: Vec<String>,
+    totals: Vec<u32>,
+    grid: Vec<Vec<u32>>,
+}
+
+fn churn(repo: &gix::Repository, today: NaiveDate, tz: FixedOffset) -> Result<Churn, FetchError> {
+    let Ok(head_id) = repo.head_id() else {
+        return Ok(Churn {
+            files: Vec::new(),
+            totals: Vec::new(),
+            grid: Vec::new(),
+        });
+    };
+    let start = grid_start_date(today);
+    let cutoff = start.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp();
+    let walker = repo
+        .rev_walk([head_id.detach()])
+        .sorting(Sorting::ByCommitTimeCutoff {
+            seconds: cutoff,
+            order: CommitTimeOrder::NewestFirst,
+        })
+        .all()
+        .map_err(fail)?;
+
+    let empty_tree = repo.empty_tree();
+    let mut per_file_week: HashMap<String, Vec<u32>> = HashMap::new();
+    let mut totals: HashMap<String, u32> = HashMap::new();
+
+    for info in walker.take(MAX_COMMITS) {
+        let Ok(info) = info else { continue };
+        let Ok(commit) = repo.find_commit(info.id) else {
+            continue;
+        };
+        let Ok(time) = commit.time() else { continue };
+        let Some(dt) = DateTime::<Utc>::from_timestamp(time.seconds, 0) else {
+            continue;
+        };
+        let date = dt.with_timezone(&tz).date_naive();
+        let Some(col) = week_col(date, start) else {
+            continue;
+        };
+        let Ok(tree) = commit.tree() else { continue };
+        let parent_tree = commit
+            .parent_ids()
+            .next()
+            .and_then(|id| repo.find_commit(id.detach()).ok())
+            .and_then(|c| c.tree().ok())
+            .unwrap_or_else(|| empty_tree.clone());
+
+        let Ok(mut changes) = parent_tree.changes() else {
+            continue;
+        };
+        let _ = changes.for_each_to_obtain_tree(&tree, |change| {
+            if let Some(path) = changed_path(&change) {
+                *totals.entry(path.clone()).or_insert(0) += 1;
+                let weeks = per_file_week
+                    .entry(path)
+                    .or_insert_with(|| vec![0u32; WEEKS]);
+                if let Some(slot) = weeks.get_mut(col) {
+                    *slot = slot.saturating_add(1);
+                }
+            }
+            Ok::<_, Infallible>(ControlFlow::Continue(()))
+        });
+    }
+
+    let mut ranked: Vec<_> = totals.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.truncate(TOP_FILES);
+
+    let files: Vec<String> = ranked.iter().map(|(f, _)| f.clone()).collect();
+    let totals: Vec<u32> = ranked.iter().map(|(_, c)| *c).collect();
+    let grid: Vec<Vec<u32>> = files
+        .iter()
+        .map(|f| per_file_week.remove(f).unwrap_or_else(|| vec![0u32; WEEKS]))
+        .collect();
+    Ok(Churn {
+        files,
+        totals,
+        grid,
+    })
+}
+
+fn changed_path(change: &Change<'_, '_, '_>) -> Option<String> {
+    let (loc, mode) = match change {
+        Change::Addition {
+            location,
+            entry_mode,
+            ..
+        }
+        | Change::Deletion {
+            location,
+            entry_mode,
+            ..
+        }
+        | Change::Modification {
+            location,
+            entry_mode,
+            ..
+        }
+        | Change::Rewrite {
+            location,
+            entry_mode,
+            ..
+        } => (*location, entry_mode),
+    };
+    if loc.is_empty() || mode.is_tree() {
+        None
+    } else {
+        Some(loc.to_string())
+    }
+}
+
+fn grid_start_date(today: NaiveDate) -> NaiveDate {
+    use chrono::Datelike;
+    let offset_from_sunday = today.weekday().num_days_from_sunday() as i64;
+    today - Duration::days((WEEKS as i64 - 1) * 7 + offset_from_sunday)
+}
+
+fn week_col(date: NaiveDate, start: NaiveDate) -> Option<usize> {
+    let days = (date - start).num_days();
+    if days < 0 {
+        return None;
+    }
+    let col = (days / 7) as usize;
+    if col >= WEEKS { None } else { Some(col) }
+}
+
+fn render_body(churn: Churn, shape: Shape) -> Body {
+    match shape {
+        Shape::Text => {
+            if churn.files.is_empty() {
+                text_body("")
+            } else {
+                let line = churn
+                    .files
+                    .iter()
+                    .zip(churn.totals.iter())
+                    .map(|(f, c)| format!("{} ({c})", short_path(f)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                text_body(line)
+            }
+        }
+        _ => Body::Heatmap(HeatmapData {
+            cells: churn.grid,
+            thresholds: None,
+            row_labels: Some(churn.files.into_iter().map(|f| short_path(&f)).collect()),
+            col_labels: None,
+        }),
+    }
+}
+
+/// Truncate a long path to its basename so the heatmap row label stays readable.
+fn short_path(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).to_string()
+}
+

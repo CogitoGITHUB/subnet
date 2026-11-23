@@ -1,0 +1,41 @@
+[package]
+authors.workspace = true
+description = "Composable terminal UI commands for Nushell"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-tui"
+edition.workspace = true
+license.workspace = true
+name = "console-tui"
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-protocol = { workspace = true, features = ["os"] }
+console-engine = { workspace = true, features = ["os"] }
+console-command = { workspace = true, features = ["os"] }
+console-color-config.workspace = true
+console-explore.workspace = true
+console-utils.workspace = true
+console-system.workspace = true
+nu-ansi-term.workspace = true
+
+ansi-str = { workspace = true }
+crossterm = { workspace = true }
+lscolors = { workspace = true, default-features = false, features = [
+    "nu-ansi-term",
+] }
+mime_guess = { workspace = true }
+nucleo-matcher = { workspace = true }
+ratatui = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+typetag = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+console-cmd-lang = { workspace = true, features = ["os"] }
+console-test-support = { path = "../console-test-support", features = ["os"] }

@@ -1,6 +1,0 @@
-test mod-hashtext
-level 2
-module ../../FILE/runfile/literate/skip-journal.rkt
-call (procedure? text-hash)
-expect result equals #t
-expect seconds-under 20

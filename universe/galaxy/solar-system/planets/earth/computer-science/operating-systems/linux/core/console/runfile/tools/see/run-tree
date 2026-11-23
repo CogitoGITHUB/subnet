@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# run-tree: file tree with .run pages previewed through preview-fit.sh. Usage: run-tree [DIR]
+here=$(cd "${0%/*}" && pwd)
+d="${XDG_CONFIG_HOME:-$HOME/.config}/tree-file-manager"
+[ -f "$d/conf.hjson" ] || tree-file-manager --write-default-conf "$d" >/dev/null 2>&1
+exec tree-file-manager --cmd :toggle_preview --conf "$d/conf.hjson;$here/tree-file-manager-run.toml" "${1:-.}"

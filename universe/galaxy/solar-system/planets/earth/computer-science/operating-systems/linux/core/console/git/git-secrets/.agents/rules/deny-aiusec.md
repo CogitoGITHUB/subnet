@@ -1,0 +1,12 @@
+# Agent Rule: Deny `aiusec` Command Execution and Secret File Access
+
+The `aiusec` and `aiusecx` CLI commands are strictly forbidden from being executed by Agents (the agent) in this workspace.
+
+- Never propose or run any `aiusec` or `aiusecx` commands (e.g., `aiusec clean`, `aiusec decrypt`, `aiusec run`, `aiusec env`, etc.).
+- Never invoke lifecycle hooks or background tasks that execute `aiusec` or `aiusecx`.
+
+Agents must also never view, read, edit, create, or otherwise access secret files:
+
+- Anything inside a `.git-secrets/` directory.
+- Any file matching `*.cott.*` (encrypted `*.cott.age` blobs and redacted `*.cott.toml` previews).
+- Any decrypted file `{file}` that has a corresponding `{file}.cott.age` encrypted counterpart on disk.

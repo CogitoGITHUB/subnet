@@ -1,0 +1,447 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://s13.gifyu.com/images/b7mxd.webp">
+    <source media="(prefers-color-scheme: light)" srcset="https://s13.gifyu.com/images/b7mxl.webp">
+    <img alt="The git-secrets logo" width="600" src="https://s13.gifyu.com/images/b7mxl.webp">
+  </picture>
+</p>
+
+[![GitSecrets Verify](https://github.com/sayanarijit/cottage/actions/workflows/git-secrets-verify.yml/badge.svg)](https://github.com/sayanarijit/cottage/actions/workflows/git-secrets-verify.yml)
+[![GitSecrets Rotate](https://github.com/sayanarijit/cottage/actions/workflows/git-secrets-rotate.yml/badge.svg)](https://github.com/sayanarijit/cottage/actions/workflows/git-secrets-rotate.yml)
+[![Crates.io Version](https://img.shields.io/crates/v/git-secrets)](https://crates.io/crates/git-secrets)
+[![PyPI Version](https://img.shields.io/pypi/v/git-secrets)](https://pypi.org/project/git-secrets/)
+[![NPM Version](https://img.shields.io/npm/v/%40sayanarijit%2Fgit-secrets)](https://www.npmjs.com/package/@sayanarijit/cottage)
+[![Docker Image Version](https://img.shields.io/docker/v/sayanarijit/cottage?label=docker)](https://hub.docker.com/r/sayanarijit/cottage)
+
+**cott*age*** is a GitOps tool for teams to manage [age-encrypted](https://age-encryption.org/) secrets in git repositories.
+
+It provides a simple workflow to encrypt/decrypt secrets, manage recipients, and keep
+secrets out of the repo while still allowing for easy sharing via VCS. git-secrets also
+generates redacted previews of encrypted secrets for better visibility and supports both
+persistent and temporary decryption workflows, while ensuring secrets are never committed
+in plaintext.
+
+![Intro Demo](https://vhs.charm.sh/vhs-A8PUIhx6qdsohD6xvFPIT.gif)
+
+1. [Features](#features)
+2. [Installation](#installation)
+3. [Editor Integrations](#editor-integrations)
+   1. [VS Code Extension](#vs-code-extension)
+   2. [Cursor and Eclipse Extension](#cursor-and-eclipse-extension)
+   3. [Vim Plugin](#vim-plugin)
+4. [AI Agent Integrations](#ai-agent-integrations)
+5. [Quick Start](#quick-start)
+6. [GitOps](#gitops)
+7. [Git Hooks](#git-hooks)
+8. [Path Prefixes](#path-prefixes)
+9. [Access Control](#access-control)
+   1. [Rules](#rules)
+   2. [Verification](#verification)
+10. [Any Provider as Upstream](#any-provider-as-upstream)
+    1. [Example plugins](#example-plugins)
+11. [Sync with any device](#sync-with-any-device)
+12. [Learn More](#learn-more)
+13. [Troubleshooting](#troubleshooting)
+14. [Comparison](#comparison)
+    1. [age vs Other Encryption](#age-vs-other-encryption)
+    2. [git-secrets vs SOPS](#git-secrets-vs-sops)
+    3. [git-secrets vs dotenvx](#git-secrets-vs-dotenvx)
+    4. [git-secrets vs agebox](#git-secrets-vs-agebox)
+
+## Features
+
+- **Exposure-safe**: Uses Rust's type system to make sure bugs can never accidentally expose secrets.
+- **Team-friendly**: Share public keys (recipients) in the repo, keep private keys (identities) local.
+- **Access Control**: Simple allow/deny rules to control which secrets are encrypted for which recipients.
+- **Manages .gitignore**: Automatically updates `.gitignore` to keep unencrypted secrets out of the repo.
+- **Previews**: Generates timestamped redacted previews of encrypted secrets for better visibility.
+- **Rich diffs**: Keeps git diff clean & reviewable, while `aiusec diff` shows diff of locally modified secrets with tracked encrypted counterparts.
+- **Checksum verification**: Prevents tampering by verifying that encrypted secrets and recipient lists match the metadata.
+- **Git hooks**: Easily set up git hooks to automatically check/encrypt secrets before commit and decrypt them after checkout.
+- **Path prefixes**: Optionally store encrypted secrets and metadata under dedicated directories, instead of next to the decrypted files.
+- **Persistent secrets workflow**: `aiusec decrypt/sync` keeps decrypted secrets on disk.
+- **Smart cleanup lifecycle**: `aiusec run` (shortcut `aiusecx`) and `aiusec edit` decrypt secrets before the operation, keeping them on disk if already present beforehand or automatically cleaning them up afterwards if they were not.
+- **Clean on completion**: `aiusec encrypt --clean`, `aiusec run --clean`, and `aiusec edit --clean` ensure that decrypted files are cleaned up from disk even if they were present before.
+- **Environment injection workflow**: `aiusec env` injects decrypted secrets as environment variables to run a command, without writing them to disk at all.
+- **Secure secret piping**: `aiusec cat` decrypts in memory and prints to stdout for direct stdin piping to other tools. `aiusec tee` encrypts stdin into PATH without writing plaintext to disk. `aiusec rotate` re-encrypts existing secrets for the current recipients, also without writing plaintext to disk.
+- **Clean up**: `aiusec clean` deletes all decrypted secrets from local repo to let you run your AI agents with a tiny bit less worry.
+- **Supports jj and non-git directories**: `aiusec init` turns any directory into a secret store.
+- **Sync with any provider**: Lets you configure any provider with an API as the upstream, and start using `aiusec pull/diff/push` like `git pull/diff/push`.
+- **Sync with any device**: Secrets encrypted with git-secrets and managed in a git repo can be synced across devices with [GitSecrets Sync](https://git-secrets-sync.github.io).
+
+## Installation
+
+[Directly download the binary](https://github.com/sayanarijit/cottage/releases)
+
+Or install from a package registry:
+
+```bash
+# rust: cargo-binstall/cargo
+cargo binstall --locked git-secrets
+cargo install --locked git-secrets
+
+# python: pip/uv/uvx
+pip install git-secrets
+uv pip install git-secrets
+uvx --from git-secrets aiusec --version
+
+# node: yarn/pnpm/npx
+yarn global add @sayanarijit/cottage
+pnpm add -g @sayanarijit/cottage
+npx -p @sayanarijit/cottage aiusec --version
+```
+
+Also available as docker images:
+
+```bash
+# Docker
+docker run --rm -v $PWD:/app sayanarijit/cottage --version
+
+# Podman
+podman run --rm -v $PWD:/app quay.io/sayanarijit/cottage --version
+```
+
+Or download the latest release from [GitHub](https://github.com/sayanarijit/cottage/releases).
+
+## Editor Integrations
+
+### VS Code Extension
+
+Use the [GitSecrets VS Code extension](https://github.com/sayanarijit/vscode-plugin-git-secrets) to install `aiusec`, add Copilot safety hooks, encrypt files from the Explorer, and open `.cott.age` files through the editor workflow.
+
+[![GitSecrets VS Code Extension Demo](https://s13.gifyu.com/images/bn9p8.gif)](https://marketplace.visualstudio.com/items?itemName=sayanarijit.vscode-plugin-git-secrets)
+
+Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=sayanarijit.vscode-plugin-git-secrets), or build and install it locally from [`vscode-plugin-git-secrets`](https://github.com/sayanarijit/vscode-plugin-git-secrets).
+
+### Cursor and Eclipse Extension
+
+Download the [VSX file](https://open-vsx.org/extension/sayanarijit/vscode-plugin-git-secrets) and install it in your Cursor or Eclipse IDE. It works similar to the VS Code extension.
+
+### Vim Plugin
+
+Use the [git-secrets.vim](https://github.com/sayanarijit/cottage.vim) plugin to encrypt/decrypt secrets from Vim or Neovim.
+
+[![GitSecrets Neovim Demo](https://asciinema.org/a/1264076.svg)](https://asciinema.org/a/1264076)
+
+## AI Agent Integrations
+
+All of the integrations below keep AI agents from running `aiusec`/`aiusecx` directly and from viewing or editing secret files: anything inside `.git-secrets/`, any `*.cott.*` file (encrypted `*.cott.age` blobs and redacted `*.cott.toml` previews), and any decrypted file that still has a `*.cott.age` counterpart on disk.
+
+- [.agents](.agents) for Antigravity (`agy`)
+- [.claude](.claude) for Claude Code
+- [.codex](.codex) for Codex
+- [.cursor](.cursor) for Cursor
+- [.github](.github) for GitHub Copilot
+
+## Quick Start
+
+Init project:
+
+```bash
+mkdir project && cd project
+
+git init  # Optional, git-secrets works better with git but it's not required
+aiusec init  # Sets up the .git-secrets directory and necessary files
+
+tree -a
+# .
+# ├ .git-secrets/         <- Auto-generated by `aiusec init`
+# │ └ recipients/     <- This is where your team keeps the public keys of all the recipients.
+# │     └ sayanarijit <- Your public key. Commit it. To use an existing public key, just copy that key here.
+# ├ .git/...
+# └ .gitattributes    <- Added `*.cott.age binary linguist-generated filter=git-secrets-encrypted -diff` to avoid polluting git diff
+
+# Your private key is stored safely in `~/.config/git-secrets/identity/<dirname>/<timestamp>.key`.
+# You can run `aiusec clean --all` anytime to clean up everything git-secrets ever did.
+```
+
+Create or edit a secret:
+
+```bash
+# `aiusec edit` decrypts the file before opening in $EDITOR and re-encrypts upon save.
+# If the decrypted file was not present on disk before running `aiusec edit`, it is cleaned up afterwards.
+# If it was already present, it is kept on disk.
+aiusec edit secret.yml
+
+# Use `--clean` with `aiusec edit` or `aiusec encrypt` to ensure decrypted files are deleted even if present before
+aiusec edit secret.yml --clean    # Opens in $EDITOR, encrypts on save, and cleans up
+aiusec encrypt secret.yml --clean # Encrypts secret.yml and cleans up
+# encrypt secret.yml
+#    into secret.yml.cott.age
+#    edit secret.yml.cott.toml
+#    edit .gitignore
+# delete secret.yml
+```
+
+Run a command with decrypted secrets:
+
+```bash
+cat secret.yml
+# cat: secret.yml: No such file or directory
+
+# `aiusec run` (or shortcut `aiusecx`) decrypts secrets before running the command.
+# If the decrypted files were not present on disk beforehand, they are automatically cleaned up after the command finishes.
+# If they were already present beforehand, they are kept on disk.
+aiusec run -- kubectl apply -f secret.yml          # decrypts secret.yml.cott.age to secret.yml and runs the command
+aiusec run -- kubectl apply -f secret.yml.cott.age # also replaces the path argument with the decrypted file path
+aiusec run -- kubectl apply -f .                   # decrypts all .cott.age files in . and runs the command
+aiusec run -- ./deploy.sh                          # decrypts all .cott.age files in repo and runs the command
+
+cat secret.yml
+# cat: secret.yml: No such file or directory
+
+# Use `--clean` to ensure decrypted files are cleaned up even if they were present before
+aiusec run --clean ./deploy.sh
+```
+
+Or use the shortcut:
+
+```bash
+aiusecx -- ./deploy.sh
+aiusecx --clean -- ./deploy.sh
+```
+
+Read and pipe a decrypted secret without writing it to disk:
+
+```bash
+aiusec cat secret.yml.cott.age
+aiusec cat secret.yml | kubectl apply -f -
+aiusec cat .env.prod | docker run --rm --env-file /dev/stdin my-image:latest
+```
+
+Encrypt content from stdin without writing the decrypted file to disk:
+
+```bash
+echo hello | aiusec tee secret.txt
+pbpaste | aiusec tee secret.yml.cott.age
+```
+
+Re-encrypt secrets for updated recipients without writing decrypted files to disk:
+
+```bash
+aiusec rotate  # all secrets in the project
+aiusec rotate secret.yml.cott.age
+```
+
+Run a command with secrets injected as environment variables, without writing to disk at all:
+
+```bash
+aiusec env -- ./deploy.sh # Export secrets from .env.cott.age (default) without writing them to disk, then run deploy.sh
+aiusec env -F .env.prod.cott.age -- ./deploy.sh # exports from .env.prod.cott.age instead of .env.cott.age
+aiusec env -F secrets.json.cott.age -- printenv GIT_SECRETS_SECRET # Also supports non-dotenv files.
+```
+
+## GitOps
+
+To share your secrets with team members, just push to the git repo.
+
+```bash
+git add .
+git commit -m "Add secret.yml"
+git push origin main
+```
+
+Ask your teammates to add their public keys to `.git-secrets/recipients` and push the
+changes. Then you can pull and re-encrypt the secrets for them.
+
+```bash
+git pull origin main
+
+aiusec decrypt --skip-verify-recipients  # Decrypt missing secrets for re-encryption
+aiusec encrypt                           # Re-encrypt all secrets
+# encrypt secret.yml
+#    into secret.yml.cott.age
+#    edit secret.yml.cott.toml
+
+aiusec clean  # optional
+# delete secret.yml
+
+# review changes, commit and push
+git add .
+git commit -m "Add new recipient to secrets"
+git push origin main
+```
+
+Now your teammates can pull the latest changes and decrypt secrets for themselves.
+
+## Git Hooks
+
+You can use [prek](https://github.com/j178/prek) or [pre-commit](https://pre-commit.com/) to set up git hooks to automatically check/encrypt secrets before commit and decrypt them after checkout.
+
+See the [example prek configuration here](examples/prek.toml).
+
+After adding the `prek.toml` file, run:
+
+```bash
+prek install
+prek install --hook-type post-checkout
+prek install --hook-type post-merge
+prek install --hook-type post-rewrite
+```
+
+## Path Prefixes
+
+By default, `secret.yml.cott.age` and `secret.yml.cott.toml` live next to `secret.yml`.
+To keep them in dedicated directories, declare `path.prefix` in `git-secrets.toml`:
+
+```toml
+[path.prefix]
+encrypted = "./.git-secrets/secrets"
+metadata = "./.git-secrets/secrets"
+```
+
+`aiusec` then reads encrypted secrets and metadata from `{prefix}/{decrypted_path}.cott.age` and `{prefix}/{decrypted_path}.cott.toml`.
+These directories are auto-generated if declared.
+
+```bash
+# Find stray secrets and/or metadata and move them to the prefixed path
+aiusec prefix sync [path]
+
+# Move them back to the unprefixed relative paths, before removing the declaration from git-secrets.toml
+aiusec prefix revert
+```
+
+## Access Control
+
+### Rules
+
+In the metadata file, you can annotate which recipients the secret should be encrypted for.
+This allows you to have different secrets for different environments (e.g. staging vs production) and only encrypt them for the relevant recipients.
+
+```toml
+# secret.yml.cott.toml
+[secret]
+allow = ["sayanarijit"]  # Only encrypt for sayanarijit
+```
+
+```toml
+# secret.yml.cott.toml
+[secret]
+deny = ["sayanarijit"]  # Encrypt for everyone except sayanarijit
+```
+
+```toml
+# secret.yml.cott.toml
+[secret]
+allow = ["env/staging/*"]  # Supports glob patterns, only encrypt for recipients in env/staging
+deny = ["env/staging/badservice"]  # Encrypt for everyone in env/staging except badservice
+```
+
+Deny rules take precedence over allow rules.
+
+See [metadata specification](./SPECIFICATION.md#secretmetadata) for more details.
+
+### Verification
+
+You can run `aiusec verify` in CI to verify that the encrypted secrets and recipient lists match the metadata rules, to prevent tampering.
+
+```yaml
+# .github/workflows/git-secrets-verify.yml
+name: GitSecrets Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify secrets
+        run: docker run --rm -v "${{ github.workspace }}:/app" ghcr.io/sayanarijit/cottage verify
+```
+
+## Any Provider as Upstream
+
+With git-secrets, you can sync secrets with any provider that has an API, not just git.
+
+For that, create a file named `git-secrets.toml` in the project root and configure the upstream settings.
+
+See the [example `git-secrets.toml` here](./git-secrets.toml) and the [secret specific upstream configuration here](./examples/secrets/secret.json.cott.toml).
+
+See an [example plugin implementation here](./examples/plugins/git-secrets-plugin-vault-in-kubernetes.py).
+
+The workflow is similar to git, but instead of `git pull` and `git push`, you run `aiusec pull` and `aiusec push` to sync secrets with the configured upstream.
+
+Example:
+
+```bash
+# Pull latest changes into local encrypted secrets
+# Similar to `git pull origin`
+aiusec pull myvault
+
+# Compare diff with local decrypted secrets
+aiusec diff
+
+# Sync local decrypted secrets with local encrypted secrets
+aiusec sync
+
+# Push changes from local encrypted secrets to upstream
+# Similar to `git push origin main`
+aiusec push myvault
+```
+
+See [upstream configuration specification](./SPECIFICATION.md#upstreamconfig) for more details.
+
+### Example plugins
+
+GitSecrets supports various plugin providers to sync your secrets. Ready-to-use plugin scripts are available in the [examples/plugins](examples/plugins/) directory:
+
+- [1Password](examples/plugins/git-secrets-plugin-onepassword.py)
+- [AWS Secrets Manager](examples/plugins/git-secrets-plugin-aws-secretsmanager.py)
+- [Azure Key Vault](examples/plugins/git-secrets-plugin-azure-keyvault.py)
+- [Bitwarden](examples/plugins/git-secrets-plugin-bitwarden.py)
+- [Dashlane](examples/plugins/git-secrets-plugin-dashlane.py)
+- [Doppler](examples/plugins/git-secrets-plugin-doppler.py)
+- [ejson](examples/plugins/git-secrets-plugin-ejson.py)
+- [GitHub Secrets](examples/plugins/git-secrets-plugin-github-secrets.py)
+- [Google Cloud Secret Manager](examples/plugins/git-secrets-plugin-gcp-secretmanager.py)
+- [HashiCorp Vault](examples/plugins/git-secrets-plugin-vault.py) (also see [Vault in Kubernetes](examples/plugins/git-secrets-plugin-vault-in-kubernetes.py))
+- [Keeper Security](examples/plugins/git-secrets-plugin-keeper.py)
+- [KeePass (Passhole)](examples/plugins/git-secrets-plugin-passhole.py)
+- [LastPass](examples/plugins/git-secrets-plugin-lastpass.py)
+- [pass (password-store)](examples/plugins/git-secrets-plugin-pass.py)
+- [Proton Pass](examples/plugins/git-secrets-plugin-protonpass.py)
+- [System Keyring](examples/plugins/git-secrets-plugin-keyring.py)
+- [Zoho Vault](examples/plugins/git-secrets-plugin-zoho-vault.py)
+
+## Sync with any device
+
+Use [GitSecrets Sync](https://git-secrets-sync.github.io) to sync your secrets across your devices and browse without needing the CLI.
+
+## Learn More
+
+See [examples](examples/) directory for more usage examples.
+
+## Troubleshooting
+
+```bash
+# See debug logs with -v, -vv or -vvv
+aiusec run -vvv -- ./deploy.sh
+```
+
+## Comparison
+
+### age vs Other Encryption
+
+[age](https://age-encryption.org) uses a modern, simple algorithm optimized for secure file encryption, with a focus on usability and minimal attack surface. It also [supports SSH RSA and Ed25519 keys](https://words.filippo.io/using-ed25519-keys-for-encryption/), though it's recommended to use different keys for separate purposes and scopes.
+
+### git-secrets vs SOPS
+
+While [SOPS](https://getsops.io/) and git-secrets have many overlapping features, git-secrets has the following advantages:
+
+- Auto manage .gitignore to ensure unencrypted secrets are never committed to git.
+- Encrypted secrets being pure age encrypted .age files, allows for better interoperability with a wider ecosystem of tools.
+- Cleaner diffs - unlike SOPS, which generates diffs for every value of every secret, even if the actual change is just adding/removing a recipient, git-secrets only generates one diff per file, explicitly pointing out the change in recipients checksum.
+
+### git-secrets vs dotenvx
+
+git-secrets borrows the `aiusec env` API from [dotenvx](https://dotenvx.com).
+
+- Supports any file type, not just dotenv files.
+- Manages multiple secrets in a repo.
+- Access control rules to encrypt secrets for specific recipients.
+- Cleaner diffs - see [git-secrets vs SOPS](#git-secrets-vs-sops).
+
+### git-secrets vs agebox
+
+[agebox](https://github.com/slok/agebox) is very similar to git-secrets in core philosophy but lacks many [features](#features).

@@ -1,0 +1,227 @@
+use resvg::{tiny_skia, usvg};
+
+static LOGO_SVG: &[u8] = b"";
+// Two wordmark variants, the `oui` letters are off-white in the default
+// variant (designed for dark UIs) and near-black in the `-color` variant
+// (designed for light UIs). The runtime swap happens in
+// `render_wordmark_png` based on the theme bg's perceived luminance.
+static WORDMARK_SVG: &[u8] = b"";
+static WORDMARK_COLOR_SVG: &[u8] = b"";
+
+// 16 cells of the G logo in spiral build order (path data, fill color).
+// SVG viewBox: 0 0 809 1008.  The y=601 on cells 12/15/16 is the 1-px fix that
+// eliminates the seam visible at fade-out in the animated version.
+const CELLS: [(&str, bool); 16] = [
+    ("M604 0H804V199H604V0Z", false), //  1 R1C4, spiral start (top-right)
+    ("M404 0H604V199H404V0Z", false), //  2 R1C3
+    ("M205 0H405V199H205V0Z", false), //  3 R1C2
+    ("M5 0H205V199H5V0Z", false),     //  4 R1C1, top-left
+    ("M4 199H204V404H4V199Z", false), //  5 R2C1
+    ("M4 404H204V603H4V404Z", false), //  6 R3C1
+    ("M4 603H204V799H4V603Z", false), //  7 R4C1
+    ("M5 799H204V998H5V799Z", false), //  8 R5C1, bottom-left
+    ("M204 799H404V998H204V799Z", false), //  9 R5C2
+    ("M404 799H604V998H404V799Z", false), // 10 R5C3
+    ("M604 799H805V998H604V799Z", false), // 11 R5C4, bottom-right
+    ("M604 601H805V799H604V601Z", false), // 12 R4C4 (y=601 seam fix)
+    ("M604 403H804V601H604V403Z", false), // 13 R3C4
+    ("M404 403H604V601H404V403Z", false), // 14 R3C3, tongue
+    ("M404 601H604V799H404V601Z", true), // 15 R4C3, shadow
+    ("M204 601H404V799H204V601Z", true), // 16 R4C2, shadow
+];
+
+/// Width in terminal columns of the spinner image.
+pub const SPINNER_CELL_WIDTH: usize = 2;
+
+/// Total pre-rendered frames: 16 build + 4 hold + 8 exit.
+pub const SPINNER_FRAME_COUNT: usize = 28;
+
+fn cell_fill(shadow: bool) -> String {
+    use ratatui::style::Color;
+    let c = if shadow {
+        crate::run_style::role_dim()
+    } else {
+        crate::run_style::role_text()
+    };
+    match c {
+        Color::Rgb(r, g, b) => format!("#{:02x}{:02x}{:02x}", r, g, b),
+        Color::DarkGray => String::from("#6e6e6e"),
+        _ => String::from("#ffffff"),
+    }
+}
+
+/// Build a minimal SVG containing only the cells at the given indices.
+fn build_frame_svg(visible: impl Iterator<Item = usize>) -> String {
+    let mut s = String::from(r#"<svg viewBox="0 0 809 1008" xmlns="http://www.w3.org/2000/svg">"#);
+    for idx in visible {
+        let (d, sh) = CELLS[idx];
+        let fill = cell_fill(sh);
+        s.push_str(&format!(r#"<path d="{d}" fill="{fill}"/>"#));
+    }
+    s.push_str("</svg>");
+    s
+}
+
+/// Return the cell indices visible in frame `f` (0-based).
+fn visible_for_frame(f: usize) -> Box<dyn Iterator<Item = usize>> {
+    if f < 16 {
+        // Build: one more cell per frame
+        Box::new(0..=f)
+    } else if f < 20 {
+        // Hold: all 16 cells
+        Box::new(0..16)
+    } else {
+        // Exit: shed 2 cells per frame in reverse spiral order
+        let exit_frame = f - 20; // 0..7
+        let keep = 16usize.saturating_sub((exit_frame + 1) * 2);
+        Box::new(0..keep)
+    }
+}
+
+/// Pre-render all SPINNER_FRAME_COUNT animation frames as PNG bytes.
+/// PNG is square (px × px) to match the 2-col × 1-row cell aspect ratio,
+/// preventing vertical overflow that would scroll the terminal from the last row.
+/// Right-aligned to match `render_logo_png` so the spinner sits in the same
+/// pixel position as the static G logo it replaces.
+pub fn render_spinner_frames(bg: Option<(u8, u8, u8)>) -> Vec<Vec<u8>> {
+    let px = (SPINNER_CELL_WIDTH * 16) as u32; // 32×32 square
+    (0..SPINNER_FRAME_COUNT)
+        .filter_map(|f| {
+            let svg = build_frame_svg(visible_for_frame(f));
+            render_svg_to_png_aligned(svg.as_bytes(), px, px, HAlign::Right, bg)
+        })
+        .collect()
+}
+
+/// G logomark: 809×1008 (≈0.8:1 portrait). In a 1-row terminal at 8×16px cells,
+/// 2 cols × 1 row = 16×16px → 1:1 display ratio, close to the natural 0.8:1.
+pub const LOGO_CELL_WIDTH: usize = 2;
+
+/// "git-tui" wordmark: 1044×500 (≈2.09:1 landscape). At 4 cols × 1 row (2:1 display ratio),
+/// the scale is width-limited (SVG slightly wider than canvas), so the text fills the full
+/// row width and is ~96% of row height, about 0.7 display-px shorter than the G logo.
+pub const WORDMARK_CELL_WIDTH: usize = 4;
+
+/// Gap between the two images, in terminal columns.
+pub const GAP_COLS: u16 = 1;
+
+fn render_svg_to_png(svg_data: &[u8], px_w: u32, px_h: u32) -> Option<Vec<u8>> {
+    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center, None)
+}
+
+fn render_svg_to_png_bg(
+    svg_data: &[u8],
+    px_w: u32,
+    px_h: u32,
+    bg: Option<(u8, u8, u8)>,
+) -> Option<Vec<u8>> {
+    render_svg_to_png_aligned(svg_data, px_w, px_h, HAlign::Center, bg)
+}
+
+/// Strip Figma's drop-shadow `filter="url(#filter…)"` references from
+/// the SVG before rasterization. The shadow is a near-black 25%-alpha
+/// halo that's invisible on dark themes (the background eats it) but
+/// shows up as a dark cloud around the logo on light themes (Catppuccin
+/// Latte, Solarized Light, …). At the 8×16-pixel cell density we
+/// rasterize to, the shadow adds nothing legible anyway. The matching
+/// `<filter>` definitions stay in `<defs>`, unused, free to ignore.
+fn strip_filter_attr(svg: &[u8]) -> Vec<u8> {
+    let s = match std::str::from_utf8(svg) {
+        Ok(v) => v,
+        Err(_) => return svg.to_vec(),
+    };
+    // OnceLock so the regex is compiled at most once per process.
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"\s*filter="url\(#filter[^"]+\)""#).expect("static regex")
+    });
+    re.replace_all(s, "").into_owned().into_bytes()
+}
+
+#[derive(Clone, Copy)]
+enum HAlign {
+    Center,
+    Right,
+}
+
+fn render_svg_to_png_aligned(
+    svg_data: &[u8],
+    px_w: u32,
+    px_h: u32,
+    halign: HAlign,
+    bg: Option<(u8, u8, u8)>,
+) -> Option<Vec<u8>> {
+    let cleaned = strip_filter_attr(svg_data);
+    let opts = usvg::Options::default();
+    let tree = usvg::Tree::from_data(&cleaned, &opts).ok()?;
+    let sx = px_w as f32 / tree.size().width();
+    let sy = px_h as f32 / tree.size().height();
+    // Use uniform scale so we never distort the SVG within the pixmap.
+    let scale = sx.min(sy);
+    let rendered_w = tree.size().width() * scale;
+    let tx = match halign {
+        HAlign::Center => (px_w as f32 - rendered_w) / 2.0,
+        HAlign::Right => px_w as f32 - rendered_w,
+    };
+    let transform = tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, 0.0);
+    let mut pixmap = tiny_skia::Pixmap::new(px_w, px_h)?;
+    // Bake an opaque background into the pixmap when one is provided.
+    // The Kitty image protocol composites a transparent PNG over the
+    // terminal's window bg, NOT the cell SGR bg, so leaving the PNG
+    // transparent makes the logo render over the terminal's default
+    // (usually dark) bg even when the active theme is light. Pre-
+    // filling the pixmap with `theme.bg` produces an opaque PNG that
+    // matches the surrounding header, no compositing involved.
+    if let Some((r, g, b)) = bg {
+        pixmap.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    }
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    pixmap.encode_png().ok()
+}
+
+/// Render the G logomark.
+/// PNG is square (px × px) to match the 2-col × 1-row cell aspect ratio.
+/// The SVG is portrait (0.8:1), so it's height-limited in the square canvas, that
+/// leaves ~1.58 display-px of horizontal slack. We right-align the rendered G so the
+/// slack sits on the LEFT of the image, putting the G flush against the wordmark.
+pub fn render_logo_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
+    let px = (LOGO_CELL_WIDTH * 32) as u32; // 64×64 square
+    render_svg_to_png_aligned(LOGO_SVG, px, px, HAlign::Right, bg)
+}
+
+/// Render the "git_tui" wordmark.
+/// PNG aspect is 2:1 to match the 4-col × 1-row cell aspect ratio
+/// (4 cols × cell_w : 1 row × cell_h = 4×8 : 1×16 = 32:16 = 2:1).
+/// The SVG (1.6:1) is narrower than the canvas (2:1) → scale is height-limited
+/// → text fills the full row height, matching the G logo.
+pub fn render_wordmark_png(bg: Option<(u8, u8, u8)>) -> Option<Vec<u8>> {
+    let px_w = (WORDMARK_CELL_WIDTH * 32) as u32; // 128
+    let px_h = px_w / 2; // 64  (128:64 = 2:1)
+                         // Pick the wordmark variant whose `oui` letters contrast against
+                         // the active theme bg. `WORDMARK_SVG` has off-white `oui` for dark
+                         // themes; `WORDMARK_COLOR_SVG` has near-black `oui` for light
+                         // themes. Detection reuses `themes::is_dark_color`, the same
+                         // routine that auto-picks the syntect theme, so custom user
+                         // themes work out of the box.
+    let svg: &[u8] = match bg {
+        Some((r, g, b)) if !crate::themes::is_dark_color(ratatui::style::Color::Rgb(r, g, b)) => {
+            WORDMARK_COLOR_SVG
+        }
+        _ => WORDMARK_SVG,
+    };
+    render_svg_to_png_bg(svg, px_w, px_h, bg)
+}
+
+/// Render the standalone G logomark at the given cell size (centered in canvas).
+pub fn render_logo_sized(cell_w: u32, cell_h: u32) -> Option<Vec<u8>> {
+    let px_w = cell_w * 32;
+    let px_h = cell_h * 64;
+    render_svg_to_png(LOGO_SVG, px_w, px_h)
+}
+
+/// Render the standalone "git_tui" wordmark at the given cell size (centered in canvas).
+pub fn render_wordmark_sized(cell_w: u32, cell_h: u32) -> Option<Vec<u8>> {
+    let px_w = cell_w * 32;
+    let px_h = cell_h * 64;
+    render_svg_to_png(WORDMARK_SVG, px_w, px_h)
+}

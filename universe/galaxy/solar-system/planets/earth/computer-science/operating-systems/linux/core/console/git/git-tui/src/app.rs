@@ -1,0 +1,8330 @@
+use std::{
+    io::{self, Write},
+    rc::Rc,
+    sync::Mutex,
+    thread,
+};
+
+use ratatui::{
+    crossterm::event::{KeyCode, KeyEvent},
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Modifier, Style, Stylize},
+    text::{Line, Span},
+    widgets::{Block, Padding, Paragraph},
+    DefaultTerminal, Frame,
+};
+use rustc_hash::FxHashMap;
+
+use crate::{
+    avatar::AvatarManager,
+    color::{ColorTheme, GraphColorSet},
+    config::{CoreConfig, CursorType, UiConfig, UserCommand, UserCommandType},
+    event::{AppEvent, DialogKind, EventController, GitAction, UserEvent, UserEventWithCount},
+    external::{
+        copy_to_clipboard, exec_user_command, exec_user_command_suspend, open_url,
+        ExternalCommandParameters,
+    },
+    git::{
+        actions,
+        diff::DiffEntry,
+        status::{StatusType, UncommittedChanges},
+        Commit, CommitHash, FileChange, Head, Ref, Repository,
+    },
+    github_auth::GithubAuthState,
+    graph::{CellWidthType, GraphImageManager, GraphStyle},
+    keybind::KeyBinds,
+    protocol::ImageProtocol,
+    view::{RefreshViewContext, View},
+    widget::commit_list::{CommitInfo, CommitListState},
+    widget::{branch_detail::BranchMetadata, tag_detail::TagMetadata},
+};
+use ratatui::style::Color;
+
+#[derive(Debug, Default)]
+enum StatusLine {
+    #[default]
+    None,
+    Input(String, Option<u16>, Option<String>),
+    NotificationInfo(String),
+    NotificationSuccess(String),
+    NotificationWarn(String),
+    NotificationError(String),
+    /// Persistent search-match status. Stays on screen as long as the
+    /// list view's search is applied, never auto-clears via the 2 s
+    /// notification timer. `warn` = true picks the warn color (used
+    /// when the current query has zero matches).
+    SearchStatus {
+        msg: String,
+        warn: bool,
+    },
+    Spinner(String),
+}
+
+#[derive(Clone, Copy)]
+pub enum InitialSelection {
+    Latest,
+    Head,
+}
+
+pub enum Ret {
+    Quit,
+    Refresh(RefreshRequest),
+}
+
+#[derive(Debug)]
+pub struct RefreshRequest {
+    pub context: RefreshViewContext,
+}
+
+impl Clone for AppContext {
+    fn clone(&self) -> Self {
+        Self {
+            keybind: self.keybind.clone(),
+            core_config: self.core_config.clone(),
+            ui_config: self.ui_config.clone(),
+            color_theme: self.color_theme.clone(),
+            image_protocol: self.image_protocol,
+            avatar_manager: Mutex::new(self.avatar_manager.lock().unwrap().clone()),
+            git_user_name: self.git_user_name.clone(),
+            git_user_email: self.git_user_email.clone(),
+            git_default_branch: self.git_default_branch.clone(),
+            github_auth_state: self.github_auth_state.clone(),
+            branch_color_map: self.branch_color_map.clone(),
+            graph_color_set: self.graph_color_set.clone(),
+            graph_config: self.graph_config.clone(),
+            current_branch_remote_state: self.current_branch_remote_state,
+            repo_path: self.repo_path.clone(),
+            graph_huge_repo_warning: self.graph_huge_repo_warning,
+            bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(
+                self.bg_full_load_in_progress
+                    .load(std::sync::atomic::Ordering::Acquire),
+            ),
+        }
+    }
+}
+
+impl std::fmt::Debug for AppContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppContext")
+            .field("keybind", &self.keybind)
+            .field("core_config", &self.core_config)
+            .field("ui_config", &self.ui_config)
+            .field("color_theme", &self.color_theme)
+            .field("image_protocol", &self.image_protocol)
+            .field("avatar_manager", &"Mutex<AvatarManager>")
+            .field("git_user_name", &self.git_user_name)
+            .field("git_user_email", &self.git_user_email)
+            .field("github_auth_state", &self.github_auth_state)
+            .field("branch_color_map", &self.branch_color_map)
+            .finish()
+    }
+}
+
+pub struct AppContext {
+    pub keybind: KeyBinds,
+    pub core_config: CoreConfig,
+    pub ui_config: UiConfig,
+    pub color_theme: ColorTheme,
+    pub image_protocol: ImageProtocol,
+    pub avatar_manager: Mutex<AvatarManager>,
+    pub git_user_name: String,
+    pub git_user_email: String,
+    pub git_default_branch: String,
+    pub github_auth_state: GithubAuthState,
+    pub branch_color_map: FxHashMap<String, Color>,
+    pub graph_color_set: GraphColorSet,
+    /// User's `[graph]` TOML section. Carried alongside `graph_color_set` so
+    /// the live theme-cycle path can rebuild the set against the user's
+    /// branches/edge/background after a theme change, without re-reading
+    /// the file. The set is derived; this is the source of truth.
+    pub graph_config: crate::config::GraphConfig,
+    /// (ahead, behind) commit counts of the current branch vs its upstream.
+    /// `None` if HEAD is detached or has no upstream configured. Computed
+    /// once per `lib.rs::run` iteration; auto-refresh recreates the context
+    /// so this stays current as remote refs change.
+    pub current_branch_remote_state: Option<(usize, usize)>,
+    /// Repository working-directory path. Filled once after the repo is
+    /// loaded; widgets reach for this to check `.git/rebase-merge` (and
+    /// any other repo-state probes) without having to thread the path
+    /// through every render call.
+    pub repo_path: std::path::PathBuf,
+    /// Set to true when `lib::run` detected this is a repo too large
+    /// for the graph column to render comfortably (commit count >
+    /// HUGE_REPO_THRESHOLD). At app init we default `graph_enabled`
+    /// to false in that case, and the Config view prints a red
+    /// warning next to the toggle so the user knows what they're
+    /// signing up for if they flip it back on. Re-enabling is NOT
+    /// blocked - the user can opt in and accept the freezes /
+    /// missing rows that come with it.
+    pub graph_huge_repo_warning: bool,
+    /// True between app launch and the moment the background
+    /// streaming thread finishes shipping batches. Drives the
+    /// header logo animation. AtomicBool (not plain bool) because
+    /// the AppContext lives in `Rc<AppContext>` shared with the
+    /// active view - `Rc::get_mut` returns None while any view
+    /// holds a clone, so we can't mutate the inner directly.
+    /// Atomic interior mutability sidesteps that.
+    pub bg_full_load_in_progress: std::sync::atomic::AtomicBool,
+}
+
+impl Default for AppContext {
+    fn default() -> Self {
+        Self {
+            keybind: KeyBinds::default(),
+            core_config: CoreConfig::default(),
+            ui_config: UiConfig::default(),
+            color_theme: ColorTheme::default(),
+            image_protocol: ImageProtocol::Iterm2,
+            avatar_manager: Mutex::new(AvatarManager::new(
+                ImageProtocol::Iterm2,
+                Vec::new(),
+                None,
+                None,
+            )),
+            git_user_name: String::new(),
+            git_user_email: String::new(),
+            git_default_branch: String::new(),
+            github_auth_state: GithubAuthState::default(),
+            branch_color_map: FxHashMap::default(),
+            graph_color_set: GraphColorSet::new(&crate::config::GraphColorConfig::default()),
+            graph_config: crate::config::GraphConfig::default(),
+            current_branch_remote_state: None,
+            repo_path: std::path::PathBuf::new(),
+            graph_huge_repo_warning: false,
+            bg_full_load_in_progress: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct AppStatus {
+    status_line: StatusLine,
+    numeric_prefix: String,
+    view_area: Rect,
+    notification_timestamp: Option<std::time::Instant>,
+    /// Current frame of the header logo animation. Driven solely by
+    /// `AppContext::bg_full_load_in_progress`: incremented on each
+    /// animation tick while bg loading is in flight, stays put
+    /// otherwise. Spinning the logo is reserved for the one operation
+    /// where the wait is unbounded and worth signalling.
+    spinner_frame: usize,
+    /// Wall-clock of the last auto-refresh (FilesystemChanged → view.refresh()).
+    /// Used to throttle bursts of refreshes, the watcher already debounces and
+    /// fingerprint-compares, but two distinct legitimate changes within a
+    /// couple seconds (e.g. checkout immediately followed by a fetch in
+    /// another shell) still shouldn't double-flicker the screen.
+    last_auto_refresh: Option<std::time::Instant>,
+    /// Wall-clock of the last spinner-frame advance. Used to drive
+    /// the header logo animation off elapsed time rather than off the
+    /// `recv_timeout` Timeout branch - mouse movement floods the
+    /// channel with events, every `recv_timeout` then returns
+    /// `Ok(ev)` immediately and the Timeout branch never fires; with
+    /// the old per-Timeout tick the animation stuck on whatever frame
+    /// was current when the user grabbed the mouse. Now we check
+    /// elapsed time on every iteration of the main loop instead.
+    last_spinner_tick: Option<std::time::Instant>,
+}
+
+#[derive(Debug)]
+pub struct App<'a> {
+    repository: &'a Repository,
+    view: View<'a>,
+    app_status: AppStatus,
+    ctx: Rc<AppContext>,
+    ec: &'a EventController,
+    file_stream: Vec<crate::git::diff::DiffLine>,
+    /// Bg streaming `AppendCommits` batches that arrived while the
+    /// active view wasn't `View::List` (Detail/Diff/Config/PR/etc.).
+    /// Held here until the user returns to the list, at which point
+    /// we drain it into the now-visible `CommitListState`. Without
+    /// this buffering the user would silently lose new commits
+    /// every time they opened anything else mid-streaming and feel
+    /// "bloqué à certains commits" when scrolling later.
+    pending_append_batches: Vec<Vec<crate::widget::commit_list::CommitInfo>>,
+    /// Held-back `ReplaceGraph` payload when it arrived while a non-List
+    /// view was active (Detail/Diff/Config/PR/...) or while the list
+    /// state was temporarily taken (mid-Detail open). Swapped in on
+    /// the next return to `View::List`. Only the most recent Graph is
+    /// kept - bg only ever ships one final swap, but if a config
+    /// refresh kicks a second bg run before the first swap is consumed,
+    /// the second one wins (it's the more up-to-date topology).
+    pending_replace_graph: Option<Box<crate::graph::Graph>>,
+    /// Generation counter of the bg streaming thread whose events this
+    /// App instance should accept. Events from older generations are
+    /// silently discarded so a stale bg run can't corrupt the new App's
+    /// commit list after a config refresh or cd.
+    bg_generation: u64,
+    /// True from the moment the bg thread sends `BackgroundCacheReady`
+    /// (its RAII guard fired) until every queued `AppendCommits` /
+    /// `ReplaceGraph` payload has actually been applied to the live
+    /// `CommitListState`. The bg-loading gate (`bg_full_load_in_progress`)
+    /// is only flipped to false once this latch is set AND both queues
+    /// are empty. Without this, the gate flipped the moment the bg
+    /// thread exited, even if the user was in another view and dozens
+    /// of `AppendCommits` batches were still queued: the "..." indicator
+    /// disappeared and Shift+G landed on whatever was the last DRAINED
+    /// commit (typically the 500th from the fg slice), not the actual
+    /// repo tip. See `try_finalize_bg_loading`.
+    bg_streaming_drain_pending: bool,
+    /// Working-tree status fingerprint + last poll timestamp. The .git/
+    /// watcher only fires on `.git/` changes, so a bare file edit in
+    /// the working tree (mtime change, no `git add`) wouldn't trigger
+    /// an Uncommitted view refresh. We poll `git status --porcelain`
+    /// every ~2s while the Uncommitted view is active and fire a
+    /// RefreshUncommitted only when the output actually differs.
+    last_status_poll: Option<std::time::Instant>,
+    last_status_fingerprint: Option<String>,
+    /// Set by the FilesystemChanged handler when the event arrives
+    /// during a throttle / dialog / input window and can't fire
+    /// view.refresh() immediately. The main loop drains it back to
+    /// false as soon as the blocking condition clears, ensuring the
+    /// external git change is eventually picked up instead of
+    /// silently dropped.
+    deferred_auto_refresh: bool,
+    /// Earliest `Instant` at which the G spinner is allowed to stop. On
+    /// small repos with a warm cache, bg streaming can finish in <100ms,
+    /// faster than the eye can register the animation. Holding the flag
+    /// true until at least this instant guarantees the animation is
+    /// always perceptible. Only set on iter 0 (no animation on
+    /// `Ret::Refresh` iterations - bg doesn't re-spawn anyway).
+    spinner_visible_until: Option<std::time::Instant>,
+    brand_logo: Option<crate::protocol::PreparedImage>,
+    brand_wordmark: Option<crate::protocol::PreparedImage>,
+    brand_pending_uploads: Vec<String>,
+    spinner_frames: Vec<crate::protocol::PreparedImage>,
+    spinner_pending_uploads: Vec<String>,
+    /// Theme bg the brand PNGs were last baked against. Compared to
+    /// the current theme bg in `rebake_brand_with_theme_bg` so a
+    /// no-op keystroke in the Config view doesn't trigger a useless
+    /// re-render + re-upload (which was causing a visible double
+    /// blink when exiting the Config view).
+    last_brand_bg: Option<(u8, u8, u8)>,
+    // Header image skip-optimisation: None = unrendered/dirty; Some(id) = last uploaded.
+    // id = None means static G logo; Some(fidx) means animation frame fidx.
+    header_logo_last: Option<Option<usize>>,
+    header_wordmark_rendered: bool,
+    /// Global `d`-overlay state, when active, the header pwd becomes a text
+    /// input and a dropdown appears below. Hijacks key input until Esc/Enter.
+    dir_input: crate::dir_input::DirInputState,
+    /// Persistent list of recently-visited directories (front = most recent).
+    /// Loaded on startup, updated on every successful `cd`.
+    dir_recents: Vec<std::path::PathBuf>,
+    /// Rectangle currently occupied by the dropdown so the run loop can
+    /// delete Kitty graphics rows underneath after the buffered draw.
+    /// Without this clear the commit-graph images bleed on top of the popup.
+    dir_dropdown_area: Option<ratatui::layout::Rect>,
+    /// `(x, y)` of the input line's left edge, recorded by `render_header`
+    /// when the overlay is open, consumed by `render()` at the very end to
+    /// place the terminal cursor (same pattern as the search input).
+    dir_input_cursor_anchor: Option<(u16, u16)>,
+    /// Set by handlers that can't return `Ret::Refresh` directly (mouse
+    /// click on a dir-input suggestion, etc.). The main `run()` loop drains
+    /// it after each handler returns and exits with `Ok(Ret::Refresh(req))`,
+    /// the same path the keyboard Enter takes.
+    pending_refresh: Option<RefreshRequest>,
+    /// Transient "this dir isn't a git repo" message shown in the footer
+    /// left (replacing "Changing directory…") for ~2 seconds when the user
+    /// tries to commit a non-git target. Auto-clears once `Instant::elapsed`
+    /// passes the 2 s threshold.
+    dir_error_message: Option<(String, std::time::Instant)>,
+    /// Text selected with the mouse (drag), highlighted and copied on release.
+    text_selection: Option<crate::selection::TextSelection>,
+    /// The `Ctrl` + left-button press being held back until the button comes
+    /// up (a click or the start of a selection).
+    mouse_press: Option<ratatui::crossterm::event::MouseEvent>,
+    /// The panel a smart selection is kept to, found when the button went down.
+    selection_bounds: Option<crate::selection::Bounds>,
+    /// The last frame drawn: the selected text is read from it.
+    last_frame: Option<ratatui::buffer::Buffer>,
+    /// Shell session of the integrated terminal (`t`), owned by `run()` so it
+    /// survives refreshes.
+    shell: &'a mut crate::shell::host::ShellHost,
+    /// CI watcher behind the dot in the header, owned by `run()`.
+    ci: &'a crate::ci_monitor::CiMonitor,
+    /// Where the CI dot was drawn last frame, and the run a click opens.
+    ci_dot_rect: Option<ratatui::layout::Rect>,
+    /// The mouse is over the CI dot and its name.
+    ci_dot_hovered: bool,
+    ci_dot_run: Option<crate::github::actions::Run>,
+    /// Navigation stack for PR-originated drilldowns. Each entry
+    /// describes the view to rebuild when the current sub-page
+    /// closes, so `Esc` walks back through the chain
+    /// `DiffView → CommitDetail → PR view` instead of jumping
+    /// straight to the commit graph. Empty when no PR drilldown
+    /// is in flight.
+    pr_nav_stack: Vec<PrNavRestore>,
+    /// Cached result of `RepoCoords::from_repo(self.repository.path())`
+    ///, `true` when this repo has at least one GitHub-hosted remote.
+    /// Computed once at startup since the remote set doesn't change
+    /// during a session; the alternative would be spawning a
+    /// `git remote -v` process on every footer render / keystroke.
+    has_github_remote: bool,
+    /// Held-arrow / sustained-scroll burst tracking. When the user
+    /// keeps a navigation key down (or rolls the trackpad), the
+    /// terminal emits a steady stream of repeats; we accelerate the
+    /// per-event step once the burst has run for `NAV_BURST_ACCEL_AT`
+    /// so reaching the far end of a 300k-commit list doesn't take all
+    /// day. Reset as soon as the gap between two nav events exceeds
+    /// `NAV_BURST_GAP`, so a press-pause-press sequence stays slow.
+    nav_burst: Option<NavBurst>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NavBurst {
+    started_at: std::time::Instant,
+    last_at: std::time::Instant,
+}
+
+/// Maximum gap between two nav events that still counts as the same
+/// "hold-down" burst. ~200ms covers worst-case terminal autorepeat
+/// without bleeding into deliberate separate presses.
+/// Minimum interval between two consecutive auto-refreshes triggered
+/// by the filesystem watcher. Events that arrive inside this window
+/// after the previous refresh aren't dropped - they flip the
+/// `deferred_auto_refresh` flag and a tick at the top of the main
+/// loop fires the refresh once the window expires.
+const AUTO_REFRESH_THROTTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
+const NAV_BURST_GAP: std::time::Duration = std::time::Duration::from_millis(200);
+/// Two-tier acceleration ramp so a sustained hold ramps up gently
+/// instead of jumping straight to a teleport. First tier kicks in
+/// quickly so the user feels the speed change while they're still
+/// holding; second tier covers "I really need to traverse the whole
+/// history" cases without sending the cursor into orbit.
+const NAV_BURST_TIER_1_AT: std::time::Duration = std::time::Duration::from_millis(800);
+const NAV_BURST_TIER_1_MULT: usize = 2;
+const NAV_BURST_TIER_2_AT: std::time::Duration = std::time::Duration::from_secs(3);
+const NAV_BURST_TIER_2_MULT: usize = 4;
+
+/// One step of the PR-originated drilldown stack, the view kind
+/// to restore when the user backs out one level.
+#[derive(Debug, Clone)]
+enum PrNavRestore {
+    /// Re-open the PR list view with this PR re-selected (Detail
+    /// mode). Used as the bottom of every PR-originated chain.
+    /// `head_label` (`<user>:<branch>` for a fork) says where the PR's
+    /// commits come from, the commit detail shows it.
+    PullRequest { pr_number: u64, head_label: String },
+    /// Re-open the local `View::Detail` for this commit. Used as
+    /// the layer just below a DiffView when the user drilled into
+    /// a file from a PR's commit detail (or PR → file directly,
+    /// which synthesises this middle layer).
+    CommitDetail { sha: String },
+}
+
+impl<'a> App<'a> {
+    pub fn new(
+        repository: &'a Repository,
+        graph_image_manager: GraphImageManager,
+        graph_color_set: &'a GraphColorSet,
+        cell_width_type: CellWidthType,
+        graph_style: GraphStyle,
+        initial_selection: InitialSelection,
+        ctx: Rc<AppContext>,
+        ec: &'a EventController,
+        refresh_view_context: Option<RefreshViewContext>,
+        bg_generation: u64,
+        shell: &'a mut crate::shell::host::ShellHost,
+        ci: &'a crate::ci_monitor::CiMonitor,
+    ) -> Self {
+        // The manager owns the freshly-computed Graph; borrow it here
+        // for the per-commit setup loops. `graph_image_manager` is
+        // consumed below into `CommitListState`, the borrow ends at
+        // that point.
+        let graph = graph_image_manager.graph();
+        let mut ref_name_to_commit_index_map = FxHashMap::default();
+        let commits = graph
+            .commits
+            .iter()
+            .enumerate()
+            .map(|(i, commit)| {
+                let refs: Vec<crate::git::Ref> = repository
+                    .refs(&commit.commit_hash)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                for r in &refs {
+                    ref_name_to_commit_index_map.insert(r.name().to_string(), i);
+                }
+                let (pos_x, _) = graph.commit_pos_map[&commit.commit_hash];
+                let use_branch_color = graph_style == GraphStyle::Smooth
+                    && !ctx.core_config.graph_renderer().is_ascii();
+                let color_index = if use_branch_color {
+                    graph
+                        .commit_color_map
+                        .get(&commit.commit_hash)
+                        .copied()
+                        .unwrap_or(pos_x)
+                } else {
+                    pos_x
+                };
+                let graph_color = graph_color_set.get(color_index).to_ratatui_color();
+                let commit_arc = repository
+                    .commit_arc(&commit.commit_hash)
+                    .expect("commit must exist in Repository");
+                if commit.commit_type == crate::git::CommitType::Uncommitted {
+                    let changes = repository.uncommitted_changes().unwrap();
+                    let last_modified = changes.last_modified.map(|dt| dt.fixed_offset());
+                    let unmerged = changes
+                        .unstaged
+                        .iter()
+                        .filter(|f| f.status == crate::git::status::StatusType::Unmerged)
+                        .count();
+                    // Match the #808080 used by graph::image for the uncommitted
+                    // line, keeps the marker `│` and the message text visually
+                    // consistent with the graph rendering.
+                    CommitInfo::new_uncommitted(
+                        commit_arc,
+                        crate::run_style::role_dim(),
+                        changes.staged.len(),
+                        changes.unstaged.len(),
+                        changes.untracked.len(),
+                        unmerged,
+                        last_modified,
+                    )
+                } else {
+                    CommitInfo::new(commit_arc, refs, graph_color)
+                }
+            })
+            .collect();
+
+        let graph_cell_width = if ctx.core_config.graph_renderer().is_ascii() {
+            let lw: u16 = match cell_width_type {
+                CellWidthType::Double => 3,
+                CellWidthType::Single => 2,
+            };
+            (graph.max_pos_x + 1) as u16 * lw
+        } else {
+            match cell_width_type {
+                CellWidthType::Double => (graph.max_pos_x + 1) as u16 * 2,
+                CellWidthType::Single => (graph.max_pos_x + 1) as u16,
+            }
+        };
+        let head = repository.head();
+        let use_bc_for_refs =
+            graph_style == GraphStyle::Smooth && !ctx.core_config.graph_renderer().is_ascii();
+        let mut branch_color_map = FxHashMap::default();
+        for r in repository.all_refs() {
+            match r {
+                Ref::Branch { name, target } => {
+                    if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
+                        let ci = if use_bc_for_refs {
+                            graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
+                        } else {
+                            pos_x
+                        };
+                        let color = graph_color_set.get(ci).to_ratatui_color();
+                        branch_color_map.insert(name.clone(), color);
+                    }
+                }
+                Ref::RemoteBranch { name, target } => {
+                    if let Some(&(pos_x, _)) = graph.commit_pos_map.get(target) {
+                        let ci = if use_bc_for_refs {
+                            graph.commit_color_map.get(target).copied().unwrap_or(pos_x)
+                        } else {
+                            pos_x
+                        };
+                        let color = graph_color_set.get(ci).to_ratatui_color();
+                        branch_color_map.insert(name.clone(), color);
+                        if let Some((_, base)) = name.split_once('/') {
+                            branch_color_map.insert(base.to_string(), color);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Update ctx with branch_color_map for use in footer and other widgets
+        let ctx = {
+            let mut ctx_mut = (*ctx).clone();
+            ctx_mut.branch_color_map = branch_color_map.clone();
+            Rc::new(ctx_mut)
+        };
+
+        let mut commit_list_state = CommitListState::new(
+            commits,
+            graph_image_manager,
+            graph_cell_width,
+            head,
+            ref_name_to_commit_index_map,
+            branch_color_map,
+            ctx.core_config.search.ignore_case,
+            ctx.core_config.search.fuzzy,
+            ctx.core_config.search.regex,
+        );
+        if let InitialSelection::Head = initial_selection {
+            match repository.head() {
+                Head::Branch { name } => commit_list_state.select_ref(name),
+                Head::Detached { target } => commit_list_state.select_commit_hash(target),
+                Head::None => {}
+            }
+        }
+        let view = View::of_list(commit_list_state, ctx.clone(), ec.sender());
+
+        let mut brand_pending_uploads = Vec::new();
+        let mut prepare_brand = |png: Option<Vec<u8>>, cell_width: usize, image_id: u32| {
+            png.map(|bytes| {
+                let mut prepared = ctx
+                    .image_protocol
+                    .prepare_image(&bytes, cell_width, image_id);
+                if let Some(upload) = prepared.take_upload_data() {
+                    brand_pending_uploads.push(upload);
+                }
+                prepared
+            })
+        };
+        // Bake the active theme's bg into the brand PNGs so transparent
+        // pixels show the theme bg (light themes) instead of the
+        // terminal's own default (usually dark) via Kitty's image
+        // compositor. Only Rgb-colored themes get the treatment; other
+        // Color variants (Reset, Named, Indexed) fall back to a
+        // transparent PNG, same as before this change.
+        let brand_bg = match ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        };
+        let (brand_logo, brand_wordmark) = if ctx.core_config.graph_renderer().is_ascii() {
+            (None, None)
+        } else {
+            (
+                prepare_brand(
+                    crate::brand::render_logo_png(brand_bg),
+                    crate::brand::LOGO_CELL_WIDTH,
+                    0x0B_2A_1D,
+                ),
+                prepare_brand(
+                    crate::brand::render_wordmark_png(brand_bg),
+                    crate::brand::WORDMARK_CELL_WIDTH,
+                    0x0B_2A_1E,
+                ),
+            )
+        };
+
+        // Pre-render the 28-frame G spinner animation.
+        let (spinner_frames, spinner_pending_uploads) = {
+            let pngs = crate::brand::render_spinner_frames(brand_bg);
+            let mut frames = Vec::with_capacity(pngs.len());
+            let mut uploads = Vec::new();
+            for (i, png) in pngs.iter().enumerate() {
+                let id = 0x0B_2B_00 + i as u32;
+                let mut prepared =
+                    ctx.image_protocol
+                        .prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+                if let Some(upload) = prepared.take_upload_data() {
+                    uploads.push(upload);
+                }
+                frames.push(prepared);
+            }
+            (frames, uploads)
+        };
+
+        let spinner_visible_until = if ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500))
+        } else {
+            None
+        };
+
+        let mut app = Self {
+            repository,
+            view,
+            app_status: AppStatus::default(),
+            ctx,
+            ec,
+            file_stream: Vec::new(),
+            pending_append_batches: Vec::new(),
+            pending_replace_graph: None,
+            bg_generation,
+            bg_streaming_drain_pending: false,
+            last_status_poll: None,
+            last_status_fingerprint: None,
+            deferred_auto_refresh: false,
+            spinner_visible_until,
+            brand_logo,
+            brand_wordmark,
+            brand_pending_uploads,
+            spinner_frames,
+            spinner_pending_uploads,
+            last_brand_bg: brand_bg,
+            header_logo_last: None,
+            header_wordmark_rendered: false,
+            dir_input: crate::dir_input::DirInputState::default(),
+            dir_dropdown_area: None,
+            dir_input_cursor_anchor: None,
+            pending_refresh: None,
+            dir_error_message: None,
+            text_selection: None,
+            mouse_press: None,
+            selection_bounds: None,
+            last_frame: None,
+            shell,
+            ci,
+            ci_dot_rect: None,
+            ci_dot_hovered: false,
+            ci_dot_run: None,
+            pr_nav_stack: Vec::new(),
+            dir_recents: {
+                // On startup: load the saved list and surface the current
+                // working dir at the top so reopening the same project a few
+                // minutes later is one keystroke away.
+                let loaded = crate::recents::load();
+                if let Ok(cwd) = std::env::current_dir() {
+                    crate::recents::push(&cwd, &loaded)
+                } else {
+                    loaded
+                }
+            },
+            has_github_remote: crate::github::RepoCoords::from_repo(repository.path()).is_some(),
+            nav_burst: None,
+        };
+
+        if let Some(context) = refresh_view_context {
+            app.init_with_context(context);
+        }
+
+        // Seed the auto-refresh throttle window so the first FilesystemChanged
+        // event after a Ret::Refresh (typically a `cd` into a new repo) is
+        // suppressed. The FS watcher rebinds onto the new `.git/` and the
+        // initial `git log / rev-list` walks git_tui itself runs can wake
+        // inotify within the debouncer's 1.5 s window, without this seed,
+        // the first user keypress would consume that queued event and
+        // trigger a full second Refresh (visible as a screen clear right
+        // after the first navigation). 2 s of "we just settled, ignore FS
+        // noise" matches the existing THROTTLE in the FilesystemChanged
+        // handler.
+        app.app_status.last_auto_refresh = Some(std::time::Instant::now());
+
+        app
+    }
+}
+
+impl App<'_> {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<Ret, std::io::Error> {
+        self.configure_ci();
+        // No proactive `clear_image` / `clear_terminal` here. Those
+        // emitted Kitty delete-all escapes and full-screen blanks
+        // at EVERY entry into the App, including the silent swap
+        // path where the bg thread shipped a full-history
+        // Repository back: the user saw "3-4 s of load, then the
+        // screen wiped, then the app was unusable". Ratatui's
+        // per-frame diff handles the redraw naturally; individual
+        // view transitions still call clear_image / clear_terminal
+        // themselves at the right moments (CloseDetail, OpenConfig,
+        // etc.).
+        let mut needs_draw = true;
+        'main_loop: loop {
+            // Clear notifications after 3 seconds
+            if let Some(timestamp) = self.app_status.notification_timestamp {
+                if timestamp.elapsed() >= std::time::Duration::from_secs(2) {
+                    self.clear_status_line();
+                    self.app_status.notification_timestamp = None;
+                    needs_draw = true;
+                }
+            }
+
+            // Debounced filesystem read for the dir-input overlay's
+            // suggestion dropdown. The edit methods (insert_char,
+            // backspace, etc.) only mark the input as dirty, the actual
+            // `read_dir()` happens here, once the user has stopped typing
+            // for `SUGGESTIONS_DEBOUNCE`. Fires regardless of `needs_draw`
+            // because the Tick that wakes us up (spinner_active during
+            // the overlay) drives this loop iteration.
+            if self.dir_input.active {
+                let recents = self.dir_recents.clone();
+                if self.dir_input.flush_pending_refresh(&recents) {
+                    needs_draw = true;
+                }
+            }
+
+            // Drain a pending auto-refresh deferred from an earlier
+            // FilesystemChanged that arrived inside the throttle
+            // window / during a dialog / during text input. Once the
+            // window expires and no input is blocking, fire it.
+            if let View::Actions(view) = &mut self.view {
+                view.tick(std::time::Instant::now());
+            }
+            if self.deferred_auto_refresh {
+                let is_dialog = matches!(self.view, View::Dialog(_));
+                let is_input = matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+                let is_view_input =
+                    self.view.is_input_active() || matches!(self.view, View::Terminal(_));
+                let throttled = self
+                    .app_status
+                    .last_auto_refresh
+                    .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
+                    .unwrap_or(false);
+                if !is_dialog && !is_input && !is_view_input && !throttled {
+                    self.deferred_auto_refresh = false;
+                    self.app_status.last_auto_refresh = Some(std::time::Instant::now());
+                    crate::glog_info!("watcher: draining deferred refresh");
+                    self.view.refresh();
+                }
+            }
+
+            // Working-tree polling: the .git/ watcher doesn't fire for
+            // raw file edits (mtime change without `git add`), so the
+            // Uncommitted view would otherwise stay stale until manual
+            // `R`. Poll `git status --porcelain` every 2 s when that
+            // view is active, compare fingerprint vs last, fire a
+            // RefreshUncommitted only on change. Idle-cheap: no work
+            // outside the Uncommitted view.
+            if matches!(self.view, View::Uncommitted(_))
+                && self
+                    .last_status_poll
+                    .map(|t| t.elapsed() >= std::time::Duration::from_secs(2))
+                    .unwrap_or(true)
+            {
+                self.last_status_poll = Some(std::time::Instant::now());
+                let new_fp = self.poll_working_tree_fingerprint();
+                if new_fp != self.last_status_fingerprint {
+                    self.last_status_fingerprint = new_fp;
+                    self.ec.sender().send(AppEvent::RefreshUncommitted);
+                }
+            }
+
+            if needs_draw {
+                // Catch any queued bg-stream batches that arrived
+                // while a non-list view was active: they'll only
+                // become visible to the user if we extend the list
+                // state BEFORE the next render computes its layout.
+                self.drain_pending_append_batches();
+                // Same for a held-back `ReplaceGraph`: if the bg
+                // streamer's final Graph swap landed while the user
+                // was in Detail / PR / etc., apply it now so the
+                // next render rebakes lanes against the full topology.
+                self.drain_pending_replace_graph();
+                self.prepare_render(terminal)?;
+                self.flush_pending_graph_uploads()?;
+                let completed = terminal.draw(|f| {
+                    self.render(f);
+                    if let Some(selection) = &self.text_selection {
+                        crate::selection::highlight(f.buffer_mut(), selection);
+                    }
+                })?;
+                self.last_frame = Some(completed.buffer.clone());
+                self.flush_pending_avatar_deletes()?;
+                if let Some(dialog_area) = self.view.dialog_area() {
+                    if !dialog_area.is_empty() {
+                        for y in dialog_area.top()..dialog_area.bottom() {
+                            let _ = self.ctx.image_protocol.delete_row(y);
+                        }
+                    }
+                }
+                // Popup resize → graph re-sync. The Kitty Unicode-placeholder
+                // protocol creates a placement when a placeholder cell is
+                // first emitted and DOESN'T drop it when that cell is later
+                // overwritten, so we manually re-issue the cleanup whenever
+                // the dropdown's height changes:
+                //   GROW: new rows previously held graph placeholders that
+                //         became placements; those placements still display
+                //         on top of the popup until we delete the image ids.
+                //   SHRINK: rows that we cleared earlier now need their
+                //           graph back AND ratatui's diff might leave ghost
+                //           popup cells on screen, terminal.clear() forces
+                //           a full re-emit. The reset of `view.clear_graph_images`
+                //           triggers a fresh upload on the next frame so
+                //           placements regenerate everywhere outside the
+                //           current popup rectangle.
+                if self.dir_input.active {
+                    let height = self.dir_dropdown_area.map(|a| a.height).unwrap_or(0);
+                    if height != self.dir_input.last_rendered_height {
+                        // Delete only graph image placements + reset their
+                        // manager state, avatars (placed past the popup's
+                        // right edge) keep their cache intact, so the full
+                        // window doesn't blink, only the graph column does.
+                        // We do NOT `continue` here, an extra immediate
+                        // redraw would re-run flush_pending_graph_uploads,
+                        // moving the terminal cursor around via Kitty image
+                        // placement escapes (the source of the caret-jump
+                        // bug). The natural next event tick will redraw.
+                        let graph_ids = self.view.graph_image_ids_sorted();
+                        let _ = self.ctx.image_protocol.delete_images(&graph_ids);
+                        self.view.clear_graph_images();
+                        self.dir_input.last_rendered_height = height;
+                    }
+                }
+            }
+            // Advance the spinner animation on EVERY iteration of
+            // the main loop when bg loading is in flight, based on
+            // wall-clock elapsed time. We used to advance the frame
+            // counter only in the `Err(Timeout)` branch of
+            // `recv_timeout` below, but mouse movement floods the
+            // channel with events: every `recv_timeout` then returns
+            // `Ok(ev)` immediately, the Timeout branch never fires,
+            // and the animation gets stuck. Driving it off elapsed
+            // time decouples the cadence from event volume.
+            // Also tick spinner_frame while the cd popup is open so
+            // the footer braille spinner animates (it reads the same
+            // counter as the header G-logo animation).
+            if self.spinner_should_show() || self.dir_input.active || self.ci_dot().is_some() {
+                const FRAME_INTERVAL_MS: u128 = 50;
+                let should_tick = self
+                    .app_status
+                    .last_spinner_tick
+                    .map(|t| t.elapsed().as_millis() >= FRAME_INTERVAL_MS)
+                    .unwrap_or(true);
+                if should_tick {
+                    let total = if self.spinner_frames.is_empty() {
+                        10
+                    } else {
+                        crate::brand::SPINNER_FRAME_COUNT
+                    };
+                    self.app_status.spinner_frame = (self.app_status.spinner_frame + 1) % total;
+                    self.app_status.last_spinner_tick = Some(std::time::Instant::now());
+                    needs_draw = true;
+                }
+            } else {
+                // Bg done and no overlay - reset the tick clock so a
+                // new animation starts from frame 0 next time.
+                self.app_status.last_spinner_tick = None;
+            }
+            // When an animation is in flight (spinner, notification countdown,
+            // file streaming, or debounce window) we need to wake up on a
+            // regular cadence even with no user input. Otherwise we block
+            // indefinitely, no spurious 50 ms wakeups while browsing.
+            let animated = self.spinner_should_show()
+                || self.app_status.notification_timestamp.is_some()
+                || !self.file_stream.is_empty()
+                || self.dir_input.active
+                || self.ci_dot().is_some()
+                // Uncommitted view polls `git status --porcelain`
+                // periodically to pick up working-tree edits the
+                // `.git/` watcher can't see; we need the timeout-based
+                // recv to wake us up on cadence even with no events.
+                || matches!(self.view, View::Uncommitted(_))
+                || matches!(&self.view, View::Actions(v) if v.wants_ticks())
+                // Deferred auto-refresh waiting for its throttle
+                // window to expire needs the loop to tick so the
+                // drain check at the top runs.
+                || self.deferred_auto_refresh;
+
+            let event = if animated {
+                match self.ec.recv_timeout(std::time::Duration::from_millis(50)) {
+                    Ok(ev) => {
+                        needs_draw = true;
+                        Some(ev)
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // Animation tick, advance time-based state.
+                        let notif_expiring = self
+                            .app_status
+                            .notification_timestamp
+                            .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
+                            .unwrap_or(false);
+                        let streaming = if !self.file_stream.is_empty() {
+                            let chunk_size = 100.min(self.file_stream.len());
+                            let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
+                            if let View::Diff(ref mut view) = self.view {
+                                view.append_addition_lines(chunk);
+                            }
+                            true
+                        } else {
+                            false
+                        };
+                        // Spinner frame is now advanced at the top
+                        // of the loop based on elapsed time; nothing
+                        // to do here besides bubble up other
+                        // animation-driven redraw triggers. If bg
+                        // loading is still in flight, the next iter
+                        // will tick on the elapsed-time check.
+                        needs_draw = needs_draw
+                            || notif_expiring
+                            || streaming
+                            || self
+                                .ctx
+                                .bg_full_load_in_progress
+                                .load(std::sync::atomic::Ordering::Acquire);
+                        None
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        panic!("event channel disconnected");
+                    }
+                }
+            } else {
+                needs_draw = true;
+                Some(self.ec.recv())
+            };
+
+            let Some(event) = event else { continue };
+            // Coalesce: dispatch this event, then keep draining the
+            // queue (try_recv, non-blocking) without yielding to
+            // render until it's empty. Held-down arrows and fast
+            // trackpad scrolls otherwise back up dozens of events,
+            // which the loop would re-render between, the scroll
+            // would visibly keep moving for a second or two after
+            // the user let go. Coalescing makes the cursor stop on
+            // the exact event the user emitted last. Cap at 1024 per
+            // cycle so a runaway producer can't starve render.
+            let mut current_event = event;
+            let mut drained = 0usize;
+            // PROGRESSIVE-UX: total commits applied to the live list
+            // state during THIS dispatch cycle (across one or more
+            // `AppendCommits` events coalesced together by `try_recv`).
+            // When this crosses `APPEND_YIELD_THRESHOLD` we break out
+            // of the dispatch loop, render, and come back. Without
+            // this, the bg streamer's 600+ back-to-back batches all
+            // land in a single dispatch cycle and the user sees ONE
+            // jump from 500 -> 332k instead of a progressive flow.
+            let mut appended_this_cycle = 0usize;
+            const APPEND_YIELD_THRESHOLD: usize = 1500;
+            'dispatch: loop {
+                match current_event {
+                    AppEvent::Key(key) => {
+                        // A key ends a selection in progress.
+                        self.text_selection = None;
+                        self.mouse_press = None;
+                        // In the integrated terminal every key belongs to the
+                        // shell, except the one that leaves it.
+                        if self.handle_terminal_key(key) {
+                            continue 'main_loop;
+                        }
+                        // Wherever there is typing the editing shortcuts are
+                        // the same (Ctrl+A/E, Alt+B/F, Ctrl+W…): map them to
+                        // the keys every text field already understands.
+                        let key = if self.dir_input.active
+                            || self.view.is_input_active()
+                            || matches!(self.app_status.status_line, StatusLine::Input(_, _, _))
+                        {
+                            crate::text_edit::normalize_edit_key(key)
+                        } else {
+                            key
+                        };
+                        // The change-directory overlay hijacks every key while
+                        // open, typing extends the input, Esc cancels, Enter
+                        // commits. Handled before the keybind dispatch so the
+                        // user can freely type letters that are otherwise bound
+                        // to view actions (`d`, `b`, etc.).
+                        if self.dir_input.active {
+                            let was_active = true;
+                            let target_path = self.handle_dir_input_key(key);
+                            // If the user just cancelled (Esc closed the
+                            // overlay without committing) we force a full
+                            // terminal redraw so ratatui's diff doesn't leave
+                            // popup characters baked into the screen. The
+                            // re-uploaded images come back via the next
+                            // prepare_graph_uploads cycle.
+                            if was_active && !self.dir_input.active && target_path.is_none() {
+                                // Esc / cancel, force the graph re-render. The
+                                // popup-open path deleted the graph placements
+                                // from Kitty, so we need the manager to see
+                                // "nothing uploaded" and queue fresh uploads on
+                                // the next prepare_graph_uploads cycle.
+                                self.view.clear_graph_images();
+                                self.clear_terminal(terminal)?;
+                                continue 'main_loop;
+                            }
+                            if let Some(target) = target_path {
+                                // Reject invalid targets *before* doing the cd
+                                // a transient footer message is friendlier than
+                                // tearing down the overlay and re-opening the
+                                // current repo. The overlay stays open so the
+                                // user can pick another path. We distinguish
+                                // "path missing" from "path exists but isn't a
+                                // git repo root" so the user knows whether to
+                                // fix the typo or pick a different folder.
+                                if !target.exists() {
+                                    self.dir_error_message = Some((
+                                        "directory does not exist".to_string(),
+                                        std::time::Instant::now(),
+                                    ));
+                                    continue 'main_loop;
+                                }
+                                let repo_root = match crate::git::find_repo_root(&target) {
+                                    Some(r) => r,
+                                    None => {
+                                        self.dir_error_message = Some((
+                                            "not a git directory".to_string(),
+                                            std::time::Instant::now(),
+                                        ));
+                                        continue 'main_loop;
+                                    }
+                                };
+                                match std::env::set_current_dir(&repo_root) {
+                                    Ok(_) => {
+                                        self.dir_recents =
+                                            crate::recents::push(&repo_root, &self.dir_recents);
+                                        self.dir_input.close();
+                                        let _ = ratatui::crossterm::execute!(
+                                            std::io::stdout(),
+                                            ratatui::crossterm::cursor::Show
+                                        );
+                                        self.cleanup_graph_images()?;
+                                        return Ok(Ret::Refresh(RefreshRequest {
+                                            context: crate::view::RefreshViewContext::List {
+                                                list_context: crate::view::ListRefreshViewContext {
+                                                    commit_hash: String::new(),
+                                                    selected: 0,
+                                                    height: 20,
+                                                    scroll_to_top: true,
+                                                },
+                                                pending_notification: Some(format!(
+                                                    "Switched to {}",
+                                                    target.display()
+                                                )),
+                                            },
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        self.ec.send(AppEvent::NotifyError(format!(
+                                            "cd failed: {}",
+                                            e
+                                        )));
+                                        self.dir_input.close();
+                                        self.dir_dropdown_area = None;
+                                        let _ = ratatui::crossterm::execute!(
+                                            std::io::stdout(),
+                                            ratatui::crossterm::cursor::Show
+                                        );
+                                        // Same re-upload trigger as the Esc path
+                                        // so the graph reappears.
+                                        self.view.clear_graph_images();
+                                        self.clear_terminal(terminal)?;
+                                    }
+                                }
+                            }
+                            continue 'main_loop;
+                        }
+
+                        match self.app_status.status_line {
+                            StatusLine::None
+                            | StatusLine::Input(_, _, _)
+                            | StatusLine::Spinner(_) => {
+                                // do nothing
+                            }
+                            StatusLine::NotificationInfo(_)
+                            | StatusLine::NotificationSuccess(_)
+                            | StatusLine::NotificationWarn(_) => {
+                                // Clear message and pass key input as is,
+                                // but preserve search match messages
+                                if !self.view.is_search_active() {
+                                    self.clear_status_line();
+                                }
+                            }
+                            StatusLine::SearchStatus { .. } => {
+                                // Sticky, stays the whole search-applied
+                                // session. The list view clears it itself
+                                // on cancel_search / clear_search_query.
+                            }
+                            StatusLine::NotificationError(_) => {
+                                // Clear message and cancel key input
+                                self.clear_status_line();
+                                continue 'main_loop;
+                            }
+                        }
+
+                        let user_event = self.ctx.keybind.get(&key);
+
+                        if let Some(UserEvent::Cancel) = user_event {
+                            if !self.app_status.numeric_prefix.is_empty() {
+                                // Clear numeric prefix and cancel the event
+                                self.app_status.numeric_prefix.clear();
+                                continue 'main_loop;
+                            }
+                        }
+
+                        // True when a text field is actively capturing character
+                        // input: dialog Input/SecondInput, config text edit, diff
+                        // search, or the list search bar (StatusLine::Input).
+                        let text_input_active = self.view.is_input_active()
+                            || matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+
+                        match user_event {
+                            Some(UserEvent::ForceQuit) => {
+                                // Ctrl+C always quits, it cannot produce a printable char.
+                                self.ec.send(AppEvent::Quit);
+                            }
+                            Some(UserEvent::Quit) if !text_input_active => {
+                                self.ec.send(AppEvent::Quit);
+                            }
+                            Some(UserEvent::PullRequests)
+                                if !text_input_active
+                                    && !matches!(self.view, View::PullRequests(_))
+                                    && !matches!(self.view, View::Issues(_))
+                                    && !matches!(self.view, View::Actions(_)) =>
+                            {
+                                // Global shortcut, open the PR view from
+                                // anywhere EXCEPT when we're already inside
+                                // it OR inside the Issues view. In both of
+                                // those, `R` is reserved for the in-view
+                                // quote-reply action and must fall through
+                                // to the view's own handle_event. Needs
+                                // (auth + github-hosted remote): the footer
+                                // hides the hint without them, so the key
+                                // says what is missing instead of failing
+                                // silently.
+                                match github_unavailable_reason(
+                                    self.ctx.github_auth_state.is_authenticated(),
+                                    self.has_github_remote,
+                                ) {
+                                    None => self.ec.send(AppEvent::OpenPullRequests),
+                                    Some(reason) => {
+                                        self.ec.send(AppEvent::NotifyWarn(reason.into()))
+                                    }
+                                }
+                            }
+                            Some(UserEvent::Issues)
+                                if !text_input_active
+                                    && !matches!(self.view, View::Issues(_))
+                                    && !matches!(self.view, View::Actions(_)) =>
+                            {
+                                match github_unavailable_reason(
+                                    self.ctx.github_auth_state.is_authenticated(),
+                                    self.has_github_remote,
+                                ) {
+                                    None => self.ec.send(AppEvent::OpenIssues),
+                                    Some(reason) => {
+                                        self.ec.send(AppEvent::NotifyWarn(reason.into()))
+                                    }
+                                }
+                            }
+                            Some(UserEvent::Drop)
+                                if matches!(self.view, View::List(_))
+                                    && !self.view.is_search_querying()
+                                    && !self.view.is_input_active() =>
+                            {
+                                // `d` on the commit list doubles as "change
+                                // directory", `drop_commit` is only ever
+                                // relevant in the Detail view anyway, where the
+                                // event falls through to the standard handler.
+                                // We additionally bail out when ANY input is
+                                // active (search bar, dialog text field, config
+                                // edit) so the user can freely type the letter
+                                // `d` while writing.
+                                self.dir_input.open(&self.dir_recents);
+                                // Only nuke the GRAPH placements, the popup
+                                // overlays the graph column at the left, so
+                                // those need to disappear. Avatars sit at the
+                                // far-right columns (well past the popup width)
+                                // so we leave both their Kitty placements AND
+                                // the avatar-manager cache untouched, that's
+                                // what makes the open instant; re-uploading
+                                // every avatar SVG would otherwise add ~1s of
+                                // latency on busy repos.
+                                let graph_ids = self.view.graph_image_ids_sorted();
+                                let _ = self.ctx.image_protocol.delete_images(&graph_ids);
+                                self.view.clear_graph_images();
+                                // Reuse the global spinner machinery so the
+                                // header G-logo animates and the footer braille
+                                // ticks at the same cadence as the Pull / Fetch
+                                // background tasks.
+                                self.app_status.numeric_prefix.clear();
+                                // Hide the real terminal cursor, we draw a fake
+                                // one into the buffer so image-protocol writes
+                                // (avatars, graph) can't visibly teleport the
+                                // hardware caret around the screen.
+                                let _ = ratatui::crossterm::execute!(
+                                    std::io::stdout(),
+                                    ratatui::crossterm::cursor::Hide
+                                );
+                            }
+                            Some(ue) => {
+                                // When a text field is capturing input, only pass
+                                // through structural dialog events. Everything else
+                                // (letter keys, Backspace, Delete, Ctrl+arrows…)
+                                // is forwarded as Unknown so the view's raw key
+                                // handler inserts the character or moves the cursor.
+                                let forward_as_raw = text_input_active
+                                    && !matches!(
+                                        ue,
+                                        UserEvent::Cancel
+                                            | UserEvent::Close
+                                            | UserEvent::Confirm
+                                            | UserEvent::NavigateUp
+                                            | UserEvent::NavigateDown
+                                            | UserEvent::RefList
+                                    );
+                                if forward_as_raw {
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                } else {
+                                    let event_with_count = process_numeric_prefix(
+                                        &self.app_status.numeric_prefix,
+                                        *ue,
+                                        key,
+                                    );
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        event_with_count,
+                                        key,
+                                        terminal,
+                                    )?;
+                                    self.app_status.numeric_prefix.clear();
+                                }
+                            }
+                            None => {
+                                if let StatusLine::Input(_, _, _) = self.app_status.status_line {
+                                    // In input mode, pass all key events to the view
+                                    // fixme: currently, the only thing that processes key_event is searching the list,
+                                    //        so this probably works, but it's not the right process...
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                } else if self.view.is_input_active() {
+                                    // Config text edit mode: pass all key events
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                } else if let KeyCode::Char(c) = key.code {
+                                    if c.is_ascii_digit()
+                                        && key.modifiers
+                                            == ratatui::crossterm::event::KeyModifiers::NONE
+                                        && (c != '0' || !self.app_status.numeric_prefix.is_empty())
+                                    {
+                                        // Accumulate numeric prefix.
+                                        self.app_status.numeric_prefix.push(c);
+                                    } else {
+                                        // Globally unbound, forward to the
+                                        // view so its scoped resolver gets
+                                        // a chance. Without this, every
+                                        // view-scoped action whose key
+                                        // isn't ALSO bound globally (e.g.
+                                        // every `[scope.pr.conversation]`
+                                        // override, every Alt-letter binding,
+                                        // every F-key) silently dropped at
+                                        // the app layer and never reached
+                                        // the view's resolve_scoped call.
+                                        self.app_status.numeric_prefix.clear();
+                                        self.handle_view_event_clearing_detail_avatar(
+                                            UserEventWithCount::from_event(UserEvent::Unknown),
+                                            key,
+                                            terminal,
+                                        )?;
+                                    }
+                                } else {
+                                    // Non-char unbound keys (F-keys, etc.)
+                                    // same story: forward to the view.
+                                    self.app_status.numeric_prefix.clear();
+                                    self.handle_view_event_clearing_detail_avatar(
+                                        UserEventWithCount::from_event(UserEvent::Unknown),
+                                        key,
+                                        terminal,
+                                    )?;
+                                }
+                            }
+                        }
+                    }
+                    AppEvent::Resize(w, h) => {
+                        let _ = (w, h);
+                        self.text_selection = None;
+                        self.mouse_press = None;
+                        self.invalidate_header();
+                        // A resize clears the terminal, and with it every
+                        // Sixel pixel. The graph column keeps the same
+                        // (offset, height, area) key when only the width
+                        // of the window changes, so its cache would write
+                        // skip cells and leave the column black. Drop it
+                        // so the rows are written again.
+                        if self.ctx.image_protocol.paints_into_cells() {
+                            self.view.clear_graph_images();
+                        }
+                    }
+                    AppEvent::Mouse(mouse) => {
+                        let selection_before = self.text_selection;
+                        needs_draw = match self.select_with_mouse(mouse) {
+                            MouseSelection::Handled(draw) => draw,
+                            MouseSelection::Ignored => self.handle_mouse_event(mouse, terminal)?,
+                            MouseSelection::Click(press) => {
+                                // The click the selection held back, then the release.
+                                let pressed = self.handle_mouse_event(press, terminal)?;
+                                let released = self.handle_mouse_event(mouse, terminal)?;
+                                pressed || released
+                            }
+                        };
+                        // The highlight has to appear or go away.
+                        if self.text_selection != selection_before {
+                            needs_draw = true;
+                        }
+                        if let Some(req) = self.pending_refresh.take() {
+                            // A handler (currently: dir-input dropdown 2nd-click)
+                            // asked for a full app rebuild. Mirror the keyboard
+                            // Enter path: drop graph images so kitty doesn't carry
+                            // them into the new repo, then bubble up Ret::Refresh.
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(req));
+                        }
+                    }
+                    AppEvent::Quit => {
+                        self.cleanup_graph_images()?;
+                        return Ok(Ret::Quit);
+                    }
+                    AppEvent::OpenDetail => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_detail();
+                    }
+                    AppEvent::CloseDetail => {
+                        if !self.close_detail() {
+                            // No commit list state available (e.g. opened from Refs panel)
+                            // Force a full refresh to rebuild the list view
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(RefreshRequest {
+                                context: RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 0,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: None,
+                                },
+                            }));
+                        }
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenUserCommand(n) => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_user_command(n, Some(terminal));
+                    }
+                    AppEvent::CloseUserCommand => {
+                        self.close_user_command();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenRefs => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_refs();
+                    }
+                    AppEvent::CloseRefs => {
+                        self.clear_image(Some(terminal))?;
+                        self.close_refs();
+                    }
+                    AppEvent::OpenHelp => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_help();
+                    }
+                    AppEvent::CloseHelp => {
+                        self.close_help();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenActions { run } => {
+                        match github_unavailable_reason(
+                            self.ctx.github_auth_state.is_authenticated(),
+                            self.has_github_remote,
+                        ) {
+                            None => {
+                                self.clear_image(Some(terminal))?;
+                                self.clear_terminal(terminal)?;
+                                self.open_actions(run);
+                            }
+                            Some(reason) => self.ec.send(AppEvent::NotifyWarn(reason.into())),
+                        }
+                    }
+                    AppEvent::CloseActions => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_actions();
+                    }
+                    AppEvent::ActionsRunsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_runs_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsMoreRunsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_more_runs_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsWorkflowsFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_workflows_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsRunFetched { generation, result } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_run_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::ActionsAnnotationsFetched {
+                        generation,
+                        run_id,
+                        annotations,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_annotations_fetched(generation, run_id, annotations);
+                        }
+                    }
+                    AppEvent::ActionsJobsFetched {
+                        generation,
+                        run_id,
+                        result,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_jobs_fetched(generation, run_id, result);
+                        }
+                    }
+                    AppEvent::ActionsLogsFetched {
+                        generation,
+                        job_id,
+                        result,
+                    } => {
+                        if let Some(view) = self.actions_view() {
+                            view.on_logs_fetched(generation, job_id, result);
+                        }
+                    }
+                    AppEvent::ActionsRunConfirmed { run_id, kind } => {
+                        if let Some(view) = self.actions_view() {
+                            view.perform_confirmed(run_id, kind);
+                        }
+                    }
+                    AppEvent::ActionsActionDone {
+                        label,
+                        run_id,
+                        result,
+                    } => {
+                        if result.is_ok() {
+                            self.ci.poke();
+                        }
+                        if let Some(view) = self.actions_view() {
+                            view.on_action_done(label, run_id, result);
+                        }
+                    }
+                    AppEvent::CiStatusUpdated => {}
+                    AppEvent::CiPoke => self.ci.poke(),
+                    AppEvent::OpenTerminal => {
+                        self.open_terminal(terminal)?;
+                    }
+                    AppEvent::ShellUpdated => {
+                        self.shell.acknowledge_wake();
+                        // The shell ended (`exit`): leave the terminal.
+                        if let View::Terminal(t) = &self.view {
+                            if t.session().status() != crate::shell::session::Status::Running {
+                                self.ec.send(AppEvent::CloseTerminal);
+                            }
+                        }
+                    }
+                    AppEvent::CloseTerminal => {
+                        if let Some(ret) = self.close_terminal(terminal)? {
+                            return Ok(ret);
+                        }
+                    }
+                    AppEvent::OpenConfig => {
+                        self.clear_image(Some(terminal))?;
+                        self.open_config();
+                    }
+                    AppEvent::CloseConfig => {
+                        self.close_config();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenConfigFile => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_config_file_in_editor();
+                    }
+                    AppEvent::GithubAuthFinished(state) => {
+                        self.finish_github_auth(state);
+                    }
+                    AppEvent::OpenFileDiff { hash, file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_file_diff(hash, file_path);
+                    }
+                    AppEvent::OpenStashDiff { stash_ref } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_stash_diff(stash_ref);
+                    }
+                    AppEvent::OpenCompareDiff { from_hash, to_hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_compare_diff(from_hash, to_hash);
+                    }
+                    AppEvent::CloseDiff => {
+                        self.close_diff();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::CloseDiffToDetail => {
+                        self.close_diff_to_detail();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::SelectOlderCommit => {
+                        self.select_older_commit();
+                    }
+                    AppEvent::SelectNewerCommit => {
+                        self.select_newer_commit();
+                    }
+                    AppEvent::SelectParentCommit => {
+                        self.select_parent_commit();
+                    }
+                    AppEvent::CopyToClipboard { name, value } => {
+                        self.copy_to_clipboard(name, value);
+                    }
+                    AppEvent::CopyRawToClipboard {
+                        value,
+                        success_message,
+                    } => {
+                        self.copy_raw_to_clipboard(value, success_message);
+                    }
+                    AppEvent::OpenUrl(url) => {
+                        if let Err(msg) = open_url(&url) {
+                            self.error_notification(msg);
+                        }
+                    }
+                    AppEvent::Refresh(context) => {
+                        self.stop_spinner();
+                        self.cleanup_graph_images()?;
+                        let request = RefreshRequest { context };
+                        return Ok(Ret::Refresh(request));
+                    }
+                    AppEvent::FilesystemChanged => {
+                        // Auto-refresh from external git activity. Guards:
+                        // 1. Don't disrupt user input, defer while a dialog
+                        //    or any text-input (commit message, search bar,
+                        //    ...) is active.
+                        // 2. Throttle to at most one refresh every 2 s. The
+                        //    watcher already debounces + fingerprint-compares,
+                        //    but a burst of changes shouldn't trigger
+                        //    repeated terminal redraws within a few seconds.
+                        //
+                        // CRITICAL change vs. prior behaviour: throttled
+                        // events used to be SILENTLY DROPPED. That left
+                        // the user with a stale UI when they committed in
+                        // another shell soon after launch (the startup
+                        // throttle seed was still active). We now flip a
+                        // `deferred_auto_refresh` flag and a follow-up
+                        // tick in the main loop drains it once the throttle
+                        // window expires.
+                        crate::glog_info!("watcher: FilesystemChanged received");
+                        let is_dialog = matches!(self.view, View::Dialog(_));
+                        let is_input =
+                            matches!(self.app_status.status_line, StatusLine::Input(_, _, _));
+                        let is_view_input =
+                            self.view.is_input_active() || matches!(self.view, View::Terminal(_));
+                        let throttled = self
+                            .app_status
+                            .last_auto_refresh
+                            .map(|t| t.elapsed() < AUTO_REFRESH_THROTTLE)
+                            .unwrap_or(false);
+                        if is_dialog || is_input || is_view_input || throttled {
+                            crate::glog_info!(
+                            "watcher: deferring refresh (dialog={}, input={}, view_input={}, throttled={})",
+                            is_dialog,
+                            is_input,
+                            is_view_input,
+                            throttled
+                        );
+                            self.deferred_auto_refresh = true;
+                        } else {
+                            self.app_status.last_auto_refresh = Some(std::time::Instant::now());
+                            self.deferred_auto_refresh = false;
+                            crate::glog_info!("watcher: firing view.refresh()");
+                            self.view.refresh();
+                        }
+                    }
+                    AppEvent::ReplaceGraph { gen, graph } if gen == self.bg_generation => {
+                        // Background streamer finished walking the full repo
+                        // history and shipped a fresh `Graph` covering every
+                        // commit (not just the foreground's initial slice).
+                        // Queue it first, then try to drain - the drain is
+                        // a no-op if the user is deep in another view, the
+                        // next return to `View::List` (or the explicit drain
+                        // before the next render) consumes it. Matches the
+                        // `AppendCommits` queue-first-drain-second pattern
+                        // so we never silently drop a Graph the user paid to
+                        // compute.
+                        self.pending_replace_graph = Some(graph);
+                        self.drain_pending_replace_graph();
+                    }
+                    AppEvent::ReplaceGraph { .. } => {
+                        // Stale generation, discard.
+                    }
+                    AppEvent::AvatarsUpdated => {}
+                    AppEvent::BackgroundCacheReady { gen, total_commits }
+                        if gen == self.bg_generation =>
+                    {
+                        // Bg streaming + cache write are done on the thread
+                        // side, but `AppendCommits` / `ReplaceGraph` payloads
+                        // it shipped earlier may still be queued in
+                        // `pending_*` (the user was in Detail/PR/Config and
+                        // the drain no-op'd for those). Flipping
+                        // `bg_full_load_in_progress = false` here unconditionally
+                        // turned off the "..." indicator AND let `select_last`
+                        // (Shift+G) believe the list was complete - so it
+                        // landed on the last DRAINED commit (typically the
+                        // 500th from the fg slice) instead of the actual
+                        // repo tip that was still sitting in the queue.
+                        // Defer the flip to `try_finalize_bg_loading`, which
+                        // runs after every drain and only flips once both
+                        // queues are empty.
+                        crate::glog_info!("background work done: {} commits", total_commits);
+                        self.bg_streaming_drain_pending = true;
+                        self.try_finalize_bg_loading();
+                    }
+                    AppEvent::BackgroundCacheReady { .. } => {
+                        // Stale generation, discard.
+                    }
+                    AppEvent::AppendCommits { gen, batch } if gen == self.bg_generation => {
+                        // Queue first, drain second: the batch might
+                        // arrive while the user has any non-List view
+                        // open (Detail / Diff / Config / PR / Issue / ...).
+                        // If we dropped these, the user would come back
+                        // to the list missing the commits that streamed
+                        // in during the detour, and feel randomly
+                        // "blocked" when scrolling past the live tip.
+                        // PROGRESSIVE-UX: track size BEFORE the push so
+                        // we can credit `appended_this_cycle` accurately.
+                        let batch_len = batch.len();
+                        self.pending_append_batches.push(batch);
+                        self.drain_pending_append_batches();
+                        appended_this_cycle = appended_this_cycle.saturating_add(batch_len);
+                        // Force a redraw whenever new commits land so the
+                        // list visibly grows. The bg streamer ships
+                        // batches as fast as it can compute them; without
+                        // this, AppendCommits events arriving inside the
+                        // 50 ms `recv_timeout` window relied on the
+                        // generic post-dispatch `needs_draw = true` which
+                        // *is* set, but the yield-threshold break below
+                        // lets us render mid-cycle for big repos.
+                        needs_draw = true;
+                    }
+                    AppEvent::AppendCommits { .. } => {
+                        // Stale generation, discard.
+                    }
+                    AppEvent::FullRepositoryReady(repo) => {
+                        // Swap mechanism dropped: rebuilding the App
+                        // with 332k CommitInfo entries inside a Refresh
+                        // iteration broke the event loop in ways we
+                        // couldn't diagnose at a distance (the user
+                        // reported the app frozen after the swap -
+                        // hover stopped tracking, arrows + `q` did
+                        // nothing). The repo here is discarded, the
+                        // session stays on the fg-loaded 500 commits.
+                        //
+                        // The bg thread still writes the disk cache
+                        // for future use; the proper streaming append
+                        // (CommitInfo<'a> → owned Arc<Commit>) is the
+                        // ongoing Phase 2+ refactor that'll consume
+                        // this without rebuilding the App.
+                        crate::glog_info!(
+                            "bg-loaded repository ready ({} commits) - dropped, swap disabled",
+                            repo.commit_count()
+                        );
+                        self.ctx
+                            .bg_full_load_in_progress
+                            .store(false, std::sync::atomic::Ordering::Release);
+                    }
+                    AppEvent::ClearStatusLine => {
+                        self.clear_status_line();
+                    }
+                    AppEvent::UpdateStatusInput(msg, cursor_pos, msg_r) => {
+                        self.update_status_input(msg, cursor_pos, msg_r);
+                    }
+                    AppEvent::NotifyInfo(msg) => {
+                        self.stop_spinner();
+                        self.info_notification(msg);
+                    }
+                    AppEvent::NotifySuccess(msg) => {
+                        self.stop_spinner();
+                        self.success_notification(msg);
+                    }
+                    AppEvent::NotifyWarn(msg) => {
+                        self.stop_spinner();
+                        self.warn_notification(msg);
+                    }
+                    AppEvent::NotifyError(msg) => {
+                        self.stop_spinner();
+                        self.error_notification(msg);
+                    }
+                    AppEvent::SetSearchStatus { msg, warn } => {
+                        self.stop_spinner();
+                        // No timestamp, auto-clear loop skips this variant
+                        // entirely so the message persists as long as
+                        // search-applied state is on.
+                        self.app_status.status_line = StatusLine::SearchStatus { msg, warn };
+                        self.app_status.notification_timestamp = None;
+                    }
+                    AppEvent::PushCurrentBranch => {
+                        self.execute_push_current_branch();
+                    }
+                    AppEvent::PullCurrentBranch => {
+                        self.execute_pull_current_branch();
+                    }
+                    AppEvent::CheckAbortOperation => {
+                        self.check_abort_operation();
+                    }
+                    // Phase 2 - Git Actions
+                    AppEvent::OpenDialog(kind) => self.open_dialog(kind),
+                    AppEvent::CloseDialog | AppEvent::DialogCancel => {
+                        // Over the Actions page the dialog leaves stale cells
+                        // behind (the page repaints only what it changed):
+                        // repaint the whole screen, like on a view change.
+                        let over_actions = match &mut self.view {
+                            View::Dialog(d) => matches!(d.before_mut(), View::Actions(_)),
+                            _ => false,
+                        };
+                        self.close_dialog();
+                        if over_actions {
+                            self.clear_image(Some(terminal))?;
+                            self.clear_terminal(terminal)?;
+                        }
+                    }
+                    AppEvent::DialogConfirm => self.dialog_confirm(),
+                    AppEvent::DialogInput(_input) => {}
+                    AppEvent::ExecuteGitAction { target, action } => {
+                        self.execute_git_action(target, action);
+                    }
+                    AppEvent::OpenBranchDetail { branch_name } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_branch_detail(branch_name);
+                    }
+                    AppEvent::OpenSetUpstreamDialog { branch } => {
+                        let repo_path = self.repository.path();
+                        match actions::get_remotes(repo_path) {
+                            Ok(remotes) if !remotes.is_empty() => {
+                                self.open_dialog(DialogKind::SetUpstream { remotes, branch });
+                            }
+                            _ => {
+                                self.ec.send(AppEvent::NotifyError(
+                                    "No remotes configured. Add a remote first.".into(),
+                                ));
+                            }
+                        }
+                    }
+                    AppEvent::OpenTagDetail { tag_name } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_tag_detail(tag_name);
+                    }
+                    AppEvent::OpenUncommitted => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_uncommitted();
+                    }
+                    AppEvent::StageFile { file } => self.stage_file(file),
+                    AppEvent::UnstageFile { file } => self.unstage_file(file),
+                    AppEvent::DiscardFile { file } => self.discard_file(file),
+                    AppEvent::RefreshUncommitted => {
+                        self.refresh_uncommitted();
+                    }
+                    AppEvent::Tick => {
+                        let notif_expiring = self
+                            .app_status
+                            .notification_timestamp
+                            .map(|ts| ts.elapsed() >= std::time::Duration::from_secs(2))
+                            .unwrap_or(false);
+                        // Progressive file loading: stream next chunk into the diff view
+                        let streaming = if !self.file_stream.is_empty() {
+                            let chunk_size = 100.min(self.file_stream.len());
+                            let chunk: Vec<_> = self.file_stream.drain(..chunk_size).collect();
+                            if let View::Diff(ref mut view) = self.view {
+                                view.append_addition_lines(chunk);
+                            }
+                            true
+                        } else {
+                            false
+                        };
+                        if self
+                            .ctx
+                            .bg_full_load_in_progress
+                            .load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            let total = if self.spinner_frames.is_empty() {
+                                10
+                            } else {
+                                crate::brand::SPINNER_FRAME_COUNT
+                            };
+                            self.app_status.spinner_frame =
+                                (self.app_status.spinner_frame + 1) % total;
+                            needs_draw = true;
+                        } else {
+                            needs_draw = notif_expiring
+                                || streaming
+                                || matches!(&self.view, View::Actions(v) if v.is_animating());
+                        }
+                    }
+                    AppEvent::OpenUncommittedDiff {
+                        file_path,
+                        is_staged,
+                    } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_uncommitted_diff(file_path, is_staged);
+                    }
+                    AppEvent::ToggleHunkStage {
+                        file_path,
+                        hunk_idx,
+                        currently_staged,
+                    } => {
+                        self.toggle_hunk_stage(file_path, hunk_idx, currently_staged);
+                    }
+                    AppEvent::CloseDiffToUncommitted => {
+                        self.close_diff_to_uncommitted();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::BackgroundFetch => {
+                        self.start_spinner("Fetching\u{2026}");
+                        self.start_background_fetch();
+                    }
+                    AppEvent::OpenFileHistory { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_file_history(file_path);
+                    }
+                    AppEvent::CloseFileHistory => {
+                        self.close_file_history();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenBlame { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_blame(file_path);
+                    }
+                    AppEvent::CloseBlame => {
+                        self.close_blame();
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                    }
+                    AppEvent::OpenConflictEditor { file_path } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_conflict_editor(file_path);
+                    }
+                    AppEvent::CloseConflictEditor => {
+                        // close_conflict_editor() enqueues AppEvent::Refresh, which
+                        // returns Ret::Refresh on its turn and re-initialises the
+                        // whole app (clearing the terminal as part of that re-entry).
+                        // No need to clear manually here, doing so flashed the
+                        // commit list twice on every save.
+                        self.close_conflict_editor();
+                    }
+                    AppEvent::OpenInteractiveRebase { base_hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_interactive_rebase(base_hash);
+                    }
+                    AppEvent::OpenPullRequests => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pull_requests();
+                    }
+                    AppEvent::OpenPullRequestDetail { number } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pull_requests();
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.open_by_number(number);
+                        }
+                    }
+                    AppEvent::OpenIssueDetail { number } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_issues();
+                        if let View::Issues(ref mut view) = self.view {
+                            view.open_by_number(number);
+                        }
+                    }
+                    AppEvent::ClosePullRequests => {
+                        // Wipe the terminal's image protocol state so
+                        // the PR-view avatars don't bleed into the
+                        // commit list we're about to render. Same
+                        // routine as the open path uses.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_pull_requests();
+                    }
+                    AppEvent::OpenIssues => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_issues();
+                    }
+                    AppEvent::CloseIssues => {
+                        // Same as ClosePullRequests, wipe lingering
+                        // image-protocol placements so the avatars from
+                        // the Issues view don't ghost onto the next
+                        // view (commit list) we're about to render.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.close_issues();
+                    }
+                    AppEvent::PullRequestsListFetched { generation, result } => {
+                        if let Some(view) = self.pull_requests_view() {
+                            view.on_list_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::IssuesListFetched { generation, result } => {
+                        if let Some(view) = self.issues_view() {
+                            view.on_list_fetched(generation, result);
+                        }
+                    }
+                    AppEvent::IssueDetailFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_detail_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueActionDone {
+                        number,
+                        action,
+                        result,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_action_done(number, action, result);
+                        }
+                    }
+                    AppEvent::IssueTimelineFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_timeline_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueLinkedFetched { number, result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_linked_fetched(number, result);
+                        }
+                    }
+                    AppEvent::IssueMentionPrsFetched { result } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_mention_prs_fetched(result);
+                        }
+                    }
+                    AppEvent::PrMentionIssuesFetched { issues } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_mention_issues_fetched(issues);
+                        }
+                    }
+                    AppEvent::IssueReactionApplied {
+                        issue_number,
+                        target_idx,
+                        kind,
+                        reaction_id,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_reaction_applied(issue_number, target_idx, kind, reaction_id);
+                        }
+                    }
+                    AppEvent::IssueReactionRemoved {
+                        issue_number,
+                        target_idx,
+                        kind,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_reaction_removed(issue_number, target_idx, kind);
+                        }
+                    }
+                    AppEvent::PrReactionApplied {
+                        pr_number,
+                        target_idx,
+                        kind,
+                        reaction_id,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_reaction_applied(pr_number, target_idx, kind, reaction_id);
+                        }
+                    }
+                    AppEvent::PrReactionRemoved {
+                        pr_number,
+                        target_idx,
+                        kind,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_reaction_removed(pr_number, target_idx, kind);
+                        }
+                    }
+                    AppEvent::IssueViewerReactionsFetched {
+                        issue_number,
+                        target_idx,
+                        reactions,
+                    } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_viewer_reactions_fetched(issue_number, target_idx, reactions);
+                        }
+                    }
+                    AppEvent::PrViewerReactionsFetched {
+                        pr_number,
+                        target_idx,
+                        reactions,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_viewer_reactions_fetched(pr_number, target_idx, reactions);
+                        }
+                    }
+                    AppEvent::OpenIssueLabelsPicker {
+                        issue_number,
+                        issue_title,
+                        all_labels,
+                        currently_on_issue,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_on_issue.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueLabels {
+                                issue_number,
+                                issue_title,
+                                all_labels,
+                                selected,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::OpenIssueAssigneesPicker {
+                        issue_number,
+                        issue_title,
+                        all_users,
+                        currently_assigned,
+                    } => {
+                        let selected: Vec<bool> = all_users
+                            .iter()
+                            .map(|u| currently_assigned.contains(u))
+                            .collect();
+                        let initial = selected.clone();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueAssignees {
+                                issue_number,
+                                issue_title,
+                                all_users,
+                                selected,
+                                initial,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::OpenIssueMilestonePicker {
+                        issue_number,
+                        issue_title,
+                        all_milestones,
+                        currently_set,
+                    } => {
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::IssueMilestone {
+                                issue_number,
+                                issue_title,
+                                all_milestones,
+                                selected: currently_set,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::IssueCreated { number } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_issue_created(number);
+                        }
+                    }
+                    AppEvent::ComposeIssueLabelsPicked { labels } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_labels_picked(labels);
+                        }
+                    }
+                    AppEvent::ComposeIssueAssigneesPicked { assignees } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_assignees_picked(assignees);
+                        }
+                    }
+                    AppEvent::ComposeIssueMilestonePicked { milestone } => {
+                        if let View::Issues(ref mut view) = self.view {
+                            view.on_compose_milestone_picked(milestone);
+                        }
+                    }
+                    AppEvent::SetIssueLabels {
+                        issue_number,
+                        labels,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Labels updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_labels(t, c, issue_number, &labels)
+                            },
+                        );
+                    }
+                    AppEvent::SetIssueAssignees {
+                        issue_number,
+                        assignees,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Assignees updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_assignees(
+                                    t,
+                                    c,
+                                    issue_number,
+                                    &assignees,
+                                )
+                            },
+                        );
+                    }
+                    AppEvent::SetIssueMilestone {
+                        issue_number,
+                        milestone,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Milestone updated".into(),
+                            move |t, c| {
+                                crate::github::issue::set_issue_milestone(
+                                    t,
+                                    c,
+                                    issue_number,
+                                    milestone,
+                                )
+                            },
+                        );
+                    }
+                    AppEvent::CloseIssueWithReason {
+                        issue_number,
+                        reason,
+                    } => {
+                        self.spawn_issue_write(issue_number, "Issue closed".into(), move |t, c| {
+                            crate::github::issue::close_issue(t, c, issue_number, reason)
+                        });
+                    }
+                    AppEvent::ReopenIssue { issue_number } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Issue reopened".into(),
+                            move |t, c| crate::github::issue::reopen_issue(t, c, issue_number),
+                        );
+                    }
+                    AppEvent::DeleteIssueComment {
+                        issue_number,
+                        comment_id,
+                    } => {
+                        self.spawn_issue_write(
+                            issue_number,
+                            "Comment deleted".into(),
+                            move |t, c| {
+                                crate::github::issue::delete_issue_comment(t, c, comment_id)
+                            },
+                        );
+                    }
+                    AppEvent::PullRequestDetailFetched { number, result } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_detail_fetched(number, result);
+                        }
+                    }
+                    AppEvent::PullRequestActionDone {
+                        number,
+                        action,
+                        result,
+                    } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_action_done(number, action, result);
+                        }
+                    }
+                    AppEvent::OpenPrLabelsPicker {
+                        pr_number,
+                        pr_title,
+                        all_labels,
+                        currently_on_pr,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_on_pr.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestLabels {
+                                pr_number,
+                                pr_title,
+                                all_labels,
+                                selected,
+                                for_compose: false,
+                            },
+                        ));
+                    }
+                    AppEvent::OpenPrReviewersPicker {
+                        pr_number,
+                        pr_title,
+                        all_users,
+                        currently_requested,
+                    } => {
+                        let selected: Vec<bool> = all_users
+                            .iter()
+                            .map(|name| currently_requested.contains(name))
+                            .collect();
+                        let initial = selected.clone();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestReviewers {
+                                pr_number,
+                                pr_title,
+                                all_users,
+                                selected,
+                                initial,
+                            },
+                        ));
+                    }
+                    AppEvent::PrCommitDetailFetched { sha, result } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_commit_detail_fetched(sha, result);
+                        }
+                    }
+                    AppEvent::PrCreated { number } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_pr_created(number);
+                        }
+                    }
+                    AppEvent::OpenComposeLabelsPicker {
+                        all_labels,
+                        currently_selected,
+                    } => {
+                        let selected: Vec<bool> = all_labels
+                            .iter()
+                            .map(|l| currently_selected.contains(&l.name))
+                            .collect();
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::PullRequestLabels {
+                                pr_number: 0,
+                                pr_title: "New Pull Request".to_string(),
+                                all_labels,
+                                selected,
+                                for_compose: true,
+                            },
+                        ));
+                    }
+                    AppEvent::ComposeLabelsPicked { labels } => {
+                        if let View::PullRequests(ref mut view) = self.view {
+                            view.on_compose_labels_picked(labels);
+                        }
+                    }
+                    AppEvent::OpenPrCommitDetail {
+                        pr_number,
+                        sha,
+                        after_fetch,
+                    } => {
+                        // Wipe lingering Kitty/iTerm2/Sixel placements so
+                        // the PR view's avatars (header by-line, commit
+                        // rows, …) don't ghost on top of the CommitDetail
+                        // / Graph view we're about to render. Same routine
+                        // ClosePullRequests / OpenPullRequestDetail use.
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pr_commit_detail(pr_number, sha, after_fetch);
+                    }
+                    AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                        after_fetch,
+                    } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_pr_file_diff(pr_number, sha, file_path, after_fetch);
+                    }
+                    AppEvent::CloseInteractiveRebase => {
+                        // Same pattern as CloseConflictEditor: close + enqueue
+                        // a full Refresh so the commit list reflects the new
+                        // history (or surfaces a `rebase in progress` state).
+                        self.close_interactive_rebase();
+                    }
+                    AppEvent::OpenDetailByHash { hash } => {
+                        self.clear_image(Some(terminal))?;
+                        self.clear_terminal(terminal)?;
+                        self.open_detail_by_hash(hash);
+                    }
+                    AppEvent::SwitchWorktree { path } => {
+                        if let Err(e) = std::env::set_current_dir(&path) {
+                            self.ec.send(AppEvent::NotifyError(format!(
+                                "Cannot switch to worktree: {}",
+                                e
+                            )));
+                        } else {
+                            self.cleanup_graph_images()?;
+                            return Ok(Ret::Refresh(RefreshRequest {
+                                context: crate::view::RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 20,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: Some(format!("Switched to {}", path)),
+                                },
+                            }));
+                        }
+                    }
+                }
+                drained += 1;
+                if drained >= 1024 {
+                    break 'dispatch;
+                }
+                // PROGRESSIVE-UX: when bg streaming has been pumping
+                // AppendCommits into our queue, periodically break
+                // out of dispatch so render() runs and the user sees
+                // the list growing. Without this, all 600+ batches
+                // for a 332k-commit repo land in a single dispatch
+                // cycle (try_recv drains the channel back-to-back)
+                // and the user perceives a single 1-second freeze
+                // ending in the full list, not a stream. The
+                // threshold is high enough that small/cached repos
+                // (<1500 streamed commits in one cycle) still
+                // coalesce into a single render; big repos get
+                // ~1 frame per 1500 streamed commits.
+                if appended_this_cycle >= APPEND_YIELD_THRESHOLD {
+                    break 'dispatch;
+                }
+                match self.ec.try_recv() {
+                    Ok(next) => current_event = next,
+                    Err(_) => break 'dispatch,
+                }
+            }
+        }
+    }
+
+    fn prepare_render(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
+        let area: Rect = terminal.size()?.into();
+        let status_rows = self.notification_rows(area.width).len().max(1) as u16;
+        let [_, view_area, _, _] = split_app_areas_with_header(area, status_rows);
+        self.update_state(view_area);
+        if matches!(self.view, View::Terminal(_)) {
+            if let Some(session) = self.shell.session() {
+                session.resize(view_area.height, view_area.width);
+            }
+        }
+        self.view.update_layout(view_area);
+        // Skip graph image generation while the cd popup is open.
+        // Kitty's persistent placements sit on top of buffer cells,
+        // so any graph image under the dropdown bleeds through. The
+        // same gate used for bg_streaming applies here: defer all
+        // uploads until the overlay closes, then the next render
+        // cycle regenerates them cleanly.
+        // Sixel pixels are plain cell content, the popup simply overwrites
+        // them, so the images are kept up to date underneath it.
+        if !self.dir_input.active || self.ctx.image_protocol.paints_into_cells() {
+            self.view.prepare_graph_uploads();
+        }
+        Ok(())
+    }
+
+    /// Route a key to the dir-input overlay. Returns `Some(target)` when the
+    /// user pressed Enter on a valid resolution, the caller is responsible
+    /// for the actual `set_current_dir` + `Ret::Refresh`. `None` means "stay
+    /// in the overlay, redraw on next iteration".
+    fn handle_dir_input_key(
+        &mut self,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) -> Option<std::path::PathBuf> {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        match key.code {
+            KeyCode::Esc => {
+                self.dir_input.close();
+                self.dir_dropdown_area = None;
+                let _ = ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::cursor::Show
+                );
+                None
+            }
+            KeyCode::Enter => {
+                // The user may have hit Enter while typing inside the
+                // debounce window, force a sync refresh so `.resolve()`
+                // sees up-to-date suggestions (Enter prefers the focused
+                // suggestion when one is selected). Without this, fast
+                // typist → Enter could commit a stale completion.
+                let recents = self.dir_recents.clone();
+                self.dir_input.force_refresh(&recents);
+                let cwd = std::env::current_dir().unwrap_or_default();
+                self.dir_input.resolve(&cwd)
+            }
+            KeyCode::Down => {
+                self.dir_input.select_next();
+                None
+            }
+            KeyCode::Up => {
+                self.dir_input.select_prev();
+                None
+            }
+            KeyCode::Tab => {
+                // Tab = pick the currently focused suggestion as if the user
+                // had typed it, so they can keep refining (e.g. completing
+                // `~/work/` → `~/work/api/`). Force a sync refresh first in
+                // case the debounce window is still pending, we want the
+                // *current* selected suggestion, not a stale snapshot.
+                let recents = self.dir_recents.clone();
+                self.dir_input.force_refresh(&recents);
+                if let Some(i) = self.dir_input.selected {
+                    if let Some(s) = self.dir_input.suggestions.get(i).cloned() {
+                        // Append "/" so the next keystroke (or immediate
+                        // refresh) shows the children of the completed dir.
+                        self.dir_input.text = if s.display.ends_with('/') {
+                            s.display
+                        } else {
+                            format!("{}/", s.display)
+                        };
+                        self.dir_input.cursor = self.dir_input.text.len();
+                        self.dir_input.selected = None;
+                        self.dir_input.refresh_suggestions_from(&recents);
+                    }
+                }
+                None
+            }
+            KeyCode::Left => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.move_cursor_word_left();
+                } else {
+                    self.dir_input.move_cursor_left();
+                }
+                None
+            }
+            KeyCode::Right => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.move_cursor_word_right();
+                } else {
+                    self.dir_input.move_cursor_right();
+                }
+                None
+            }
+            KeyCode::Backspace => {
+                let recents = self.dir_recents.clone();
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.delete_word_left(&recents);
+                } else {
+                    self.dir_input.backspace(&recents);
+                }
+                None
+            }
+            KeyCode::Delete => {
+                let recents = self.dir_recents.clone();
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.dir_input.delete_word_right(&recents);
+                } else {
+                    self.dir_input.delete_right(&recents);
+                }
+                None
+            }
+            // Some terminals (xterm, alacritty…) emit Ctrl+Backspace as the
+            // BS (0x08) or DEL (0x7F) control char rather than as
+            // `KeyCode::Backspace` with the Ctrl modifier, catch them both
+            // explicitly before the generic Char arm so they trigger the
+            // word-delete instead of inserting a control character.
+            KeyCode::Char(c)
+                if (c == '\u{08}' || c == '\u{7f}')
+                    && key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let recents = self.dir_recents.clone();
+                self.dir_input.delete_word_left(&recents);
+                None
+            }
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+H is the legacy backspace mapping on a number of
+                // terminals (kitty in particular). Without this arm, the
+                // Char arm below would skip it (CONTROL filter) and the
+                // word-delete would never fire.
+                let recents = self.dir_recents.clone();
+                self.dir_input.delete_word_left(&recents);
+                None
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let recents = self.dir_recents.clone();
+                self.dir_input.insert_char(c, &recents);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn handle_view_event_clearing_detail_avatar(
+        &mut self,
+        event_with_count: UserEventWithCount,
+        key: KeyEvent,
+        _terminal: &mut DefaultTerminal,
+    ) -> Result<(), std::io::Error> {
+        let event_with_count = self.apply_nav_burst_acceleration(event_with_count);
+        self.view.handle_event(event_with_count, key);
+        self.apply_live_config_settings();
+        Ok(())
+    }
+
+    /// Detect a sustained navigation hold and multiply the step once
+    /// the burst has run for `NAV_BURST_ACCEL_AT`. Non-nav events
+    /// reset the burst so a key release stops the acceleration cleanly
+    /// (paired with the per-cycle event drain in `run()` which makes
+    /// the actual stop instant - together they kill the "scroll keeps
+    /// going for a few seconds after I let go" complaint).
+    fn apply_nav_burst_acceleration(&mut self, ewc: UserEventWithCount) -> UserEventWithCount {
+        use crate::event::UserEvent;
+        let is_nav = matches!(
+            ewc.event,
+            UserEvent::NavigateUp
+                | UserEvent::NavigateDown
+                | UserEvent::SelectUp
+                | UserEvent::SelectDown
+                | UserEvent::ScrollUp
+                | UserEvent::ScrollDown
+        );
+        if !is_nav {
+            self.nav_burst = None;
+            return ewc;
+        }
+        let now = std::time::Instant::now();
+        let burst = match self.nav_burst {
+            Some(b) if now.saturating_duration_since(b.last_at) < NAV_BURST_GAP => NavBurst {
+                started_at: b.started_at,
+                last_at: now,
+            },
+            _ => NavBurst {
+                started_at: now,
+                last_at: now,
+            },
+        };
+        self.nav_burst = Some(burst);
+        let elapsed = now.saturating_duration_since(burst.started_at);
+        let mult = if elapsed >= NAV_BURST_TIER_2_AT {
+            NAV_BURST_TIER_2_MULT
+        } else if elapsed >= NAV_BURST_TIER_1_AT {
+            NAV_BURST_TIER_1_MULT
+        } else {
+            1
+        };
+        if mult == 1 {
+            ewc
+        } else {
+            crate::event::UserEventWithCount::new(ewc.event, ewc.count.saturating_mul(mult))
+        }
+    }
+
+    /// Applies, while the Config view is open, the settings that take effect
+    /// at once: the ones marked `Live` in `ROW_APPLIES` (view/config.rs, which
+    /// also says how to decide for a new setting). Everything else waits for
+    /// `close_config`. Called after every input that can change a row
+    /// (keyboard and mouse).
+    fn apply_live_config_settings(&mut self) {
+        self.apply_live_config_behaviour();
+    }
+
+    /// The `Live` settings that are not the theme: what Ctrl + drag selects,
+    /// and whether the mouse is on. Both are about how the page itself is
+    /// used, so the user tries them right there.
+    fn apply_live_config_behaviour(&mut self) {
+        let View::Config(ref view) = self.view else {
+            return;
+        };
+        let selection_mode = view.core_config().selection_mode();
+        let mouse_enabled = view.ui_config().common.mouse_enabled;
+        let selection_changed = selection_mode != self.ctx.core_config.selection_mode();
+        let mouse_changed = mouse_enabled != self.ctx.ui_config.common.mouse_enabled;
+        if !selection_changed && !mouse_changed {
+            return;
+        }
+        let ctx = Rc::make_mut(&mut self.ctx);
+        ctx.core_config.set_selection_mode(selection_mode);
+        ctx.ui_config.common.set_mouse_enabled(mouse_enabled);
+        if mouse_changed {
+            // The terminal's mouse capture is switched right away, and
+            // `close_config` then sees nothing left to do for it.
+            let _ = if mouse_enabled {
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::EnableMouseCapture
+                )
+            } else {
+                // A selection or a held press has no mouse to finish it.
+                self.text_selection = None;
+                self.mouse_press = None;
+                ratatui::crossterm::execute!(
+                    std::io::stdout(),
+                    ratatui::crossterm::event::DisableMouseCapture
+                )
+            };
+        }
+    }
+
+    /// Re-render the brand PNGs (logo + wordmark + spinner frames) with
+    /// the current theme bg pre-filled into the pixmap, then queue the
+    /// new upload bytes and dirty the header skip-state so the next
+    /// frame re-emits the cells. Same image_ids are reused, Kitty
+    /// replaces the storage on `a=T` for an existing id.
+    fn rebake_brand_with_theme_bg(&mut self) {
+        let brand_bg = match self.ctx.color_theme.bg {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        };
+        // Guard: don't re-render + re-upload the brand PNGs when the
+        // theme hasn't actually changed. Without this, every keystroke
+        // in the Config view triggered a fresh upload, visible as a
+        // double blink on exit because two consecutive frames each
+        // pushed a full image refresh.
+        if self.last_brand_bg == brand_bg {
+            return;
+        }
+        self.last_brand_bg = brand_bg;
+
+        if self.ctx.core_config.graph_renderer().is_ascii() {
+            return;
+        }
+
+        let protocol = &self.ctx.image_protocol;
+
+        if let Some(bytes) = crate::brand::render_logo_png(brand_bg) {
+            let mut prepared =
+                protocol.prepare_image(&bytes, crate::brand::LOGO_CELL_WIDTH, 0x0B_2A_1D);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.brand_pending_uploads.push(upload);
+            }
+            self.brand_logo = Some(prepared);
+        }
+        if let Some(bytes) = crate::brand::render_wordmark_png(brand_bg) {
+            let mut prepared =
+                protocol.prepare_image(&bytes, crate::brand::WORDMARK_CELL_WIDTH, 0x0B_2A_1E);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.brand_pending_uploads.push(upload);
+            }
+            self.brand_wordmark = Some(prepared);
+        }
+
+        let pngs = crate::brand::render_spinner_frames(brand_bg);
+        let mut new_frames = Vec::with_capacity(pngs.len());
+        for (i, png) in pngs.iter().enumerate() {
+            let id = 0x0B_2B_00 + i as u32;
+            let mut prepared = protocol.prepare_image(png, crate::brand::SPINNER_CELL_WIDTH, id);
+            if let Some(upload) = prepared.take_upload_data() {
+                self.spinner_pending_uploads.push(upload);
+            }
+            new_frames.push(prepared);
+        }
+        self.spinner_frames = new_frames;
+
+        // Mark the header cells dirty so the next render writes the
+        // new image bytes + cell attrs (skip=false on this frame).
+        self.header_logo_last = None;
+        self.header_wordmark_rendered = false;
+    }
+
+    fn flush_pending_graph_uploads(&mut self) -> Result<(), std::io::Error> {
+        let mut uploads = self.view.drain_pending_graph_uploads();
+        uploads.extend(
+            self.ctx
+                .avatar_manager
+                .lock()
+                .unwrap()
+                .drain_pending_uploads(),
+        );
+        uploads.append(&mut self.brand_pending_uploads);
+        uploads.append(&mut self.spinner_pending_uploads);
+        if uploads.is_empty() {
+            return Ok(());
+        }
+
+        let mut stdout = io::stdout().lock();
+        for upload in uploads {
+            stdout.write_all(upload.as_bytes())?;
+        }
+        stdout.flush()
+    }
+
+    fn flush_pending_avatar_deletes(&mut self) -> Result<(), std::io::Error> {
+        let rows = self.view.drain_pending_avatar_deletes();
+        for row in rows {
+            self.ctx.image_protocol.delete_row(row)?;
+        }
+        Ok(())
+    }
+
+    /// Quick fingerprint of the working tree's git-tracked state:
+    /// the porcelain `git status --porcelain=v1 -z` output. Same
+    /// bytes -> same fingerprint -> no refresh. Different bytes
+    /// (file added/modified/staged/unstaged/deleted) -> refresh.
+    /// Cheaper than reparsing all the status records and lets the
+    /// expensive load happen only when something actually changed.
+    /// Returns None on git failure (we then keep the previous
+    /// fingerprint and skip the refresh).
+    fn poll_working_tree_fingerprint(&self) -> Option<String> {
+        let repo_path = self.ctx.repo_path.clone();
+        std::process::Command::new("git")
+            .arg("status")
+            .arg("--porcelain=v1")
+            .arg("-z")
+            .current_dir(&repo_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    }
+
+    /// Apply any queued `AppendCommits` batches to the active list
+    /// state. No-op if the active view isn't `View::List` - the
+    /// batches stay queued until the user returns to the list,
+    /// then drain in order on the next event-loop iteration.
+    fn drain_pending_append_batches(&mut self) {
+        if self.pending_append_batches.is_empty() {
+            return;
+        }
+        if let View::List(list_view) = &mut self.view {
+            if let Some(state) = list_view.commit_list_state_mut() {
+                for batch in self.pending_append_batches.drain(..) {
+                    state.extend_commits(batch);
+                }
+            }
+        }
+        self.try_finalize_bg_loading();
+    }
+
+    /// Drain the held-back `ReplaceGraph` payload into the list state
+    /// if the user is on `View::List` and the state isn't currently
+    /// taken. Symmetric with `drain_pending_append_batches`: invoked
+    /// both from the `ReplaceGraph` event handler (best-effort
+    /// immediate swap) and from the pre-render drain pass so a Graph
+    /// that landed while the user was in Detail / PR / Config gets
+    /// swapped in the moment they return to the list.
+    fn drain_pending_replace_graph(&mut self) {
+        let Some(new_graph) = self.pending_replace_graph.take() else {
+            return;
+        };
+        if let View::List(list_view) = &mut self.view {
+            if let Some(state) = list_view.commit_list_state_mut() {
+                // Rebuild branch_color_map from the new (full) graph so
+                // branch labels in the ref list, commit detail, and
+                // footer all use topology-derived colors that match
+                // the graph dots and separator bars.
+                let mut branch_color_map = FxHashMap::default();
+                for r in self.repository.all_refs() {
+                    match r {
+                        Ref::Branch { name, target } => {
+                            if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
+                                let gs: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                                let use_bc = gs == GraphStyle::Smooth
+                                    && !self.ctx.core_config.graph_renderer().is_ascii();
+                                let ci = if use_bc {
+                                    new_graph
+                                        .commit_color_map
+                                        .get(target)
+                                        .copied()
+                                        .unwrap_or(pos_x)
+                                } else {
+                                    pos_x
+                                };
+                                let color = self.ctx.graph_color_set.get(ci).to_ratatui_color();
+                                branch_color_map.insert(name.clone(), color);
+                            }
+                        }
+                        Ref::RemoteBranch { name, target } => {
+                            if let Some(&(pos_x, _)) = new_graph.commit_pos_map.get(target) {
+                                let gs: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                                let use_bc = gs == GraphStyle::Smooth
+                                    && !self.ctx.core_config.graph_renderer().is_ascii();
+                                let ci = if use_bc {
+                                    new_graph
+                                        .commit_color_map
+                                        .get(target)
+                                        .copied()
+                                        .unwrap_or(pos_x)
+                                } else {
+                                    pos_x
+                                };
+                                let color = self.ctx.graph_color_set.get(ci).to_ratatui_color();
+                                branch_color_map.insert(name.clone(), color);
+                                if let Some((_, base)) = name.split_once('/') {
+                                    branch_color_map.insert(base.to_string(), color);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Push the updated map into CommitListState (used by
+                // branch label rendering). Intentionally NOT cloning
+                // AppContext here: cloning creates a NEW Rc with a
+                // separate AtomicBool for bg_full_load_in_progress,
+                // which diverges from the ListView's copy and leaves
+                // the "Loading" indicator stuck forever on small repos
+                // (the App stores false on the clone's AtomicBool, but
+                // the ListView still reads true from its original).
+                state.set_branch_color_map(branch_color_map);
+
+                let ascii = self.ctx.core_config.graph_renderer().is_ascii();
+                state.replace_graph(*new_graph, &self.ctx.graph_color_set, ascii);
+                self.try_finalize_bg_loading();
+                return;
+            }
+        }
+        // Couldn't apply right now (user is in another view, or the
+        // list state is mid-take). Stash it back for the next attempt.
+        self.pending_replace_graph = Some(new_graph);
+    }
+
+    /// Flip `bg_full_load_in_progress` to false once the bg thread has
+    /// signaled completion (`BackgroundCacheReady`) AND every queued
+    /// `AppendCommits` / `ReplaceGraph` payload has been applied to
+    /// the live `CommitListState`. Called by both the
+    /// `BackgroundCacheReady` handler (in case the queues happen to
+    /// already be empty - the common in-List case) and by each drain
+    /// function after it shrinks a queue. Keeping the gate true until
+    /// the LAST drain completes is what stops Shift+G from landing
+    /// mid-list when the user was in Detail while bg was streaming.
+    fn try_finalize_bg_loading(&mut self) {
+        if !self.bg_streaming_drain_pending {
+            return;
+        }
+        if !self.pending_append_batches.is_empty() || self.pending_replace_graph.is_some() {
+            return;
+        }
+        self.bg_streaming_drain_pending = false;
+        self.ctx
+            .bg_full_load_in_progress
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// True when the header G logomark should be rendered as the
+    /// animated spinner instead of the static logo. Combines the
+    /// real bg-loading flag with a per-launch minimum visible
+    /// duration so the animation is always perceptible (warm-cache
+    /// sub-second bg completions used to flash by faster than the
+    /// eye could register).
+    fn spinner_should_show(&self) -> bool {
+        if self
+            .ctx
+            .bg_full_load_in_progress
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return true;
+        }
+        self.spinner_visible_until
+            .is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    fn cleanup_graph_images(&self) -> Result<(), std::io::Error> {
+        let mut image_ids = self.view.graph_image_ids_sorted();
+        image_ids.extend(self.ctx.avatar_manager.lock().unwrap().image_ids_sorted());
+        self.ctx.image_protocol.delete_images(&image_ids)
+    }
+
+    fn render(&mut self, f: &mut Frame) {
+        let base = Block::default()
+            .fg(self.ctx.color_theme.fg)
+            .bg(self.ctx.color_theme.bg);
+        f.render_widget(base, f.area());
+
+        let notification = self.notification_rows(f.area().width);
+        let [header_area, view_area, gap_area, status_line_area] =
+            split_app_areas_with_header(f.area(), notification.len().max(1) as u16);
+
+        self.update_state(view_area);
+
+        self.render_header(f, header_area);
+        self.view.render(f, view_area);
+
+        // Dir-input dropdown overlays the top of the view content while the
+        // overlay is active. Drawn AFTER the view so it paints on top.
+        if self.dir_input.active {
+            self.render_dir_dropdown(f, view_area);
+        } else {
+            // Make sure stale areas don't trigger Kitty-graphics clears on
+            // the next frame after the overlay closes.
+            self.dir_dropdown_area = None;
+        }
+
+        // Dotted separator between view content and shortcuts bar
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let sep_span = Span::styled("╌".repeat(gap_area.width as usize), sep_style);
+        f.render_widget(Paragraph::new(Line::from(sep_span)), gap_area);
+
+        if notification.len() > 1 {
+            // An error or a warning too long for one row is wrapped over
+            // the rows the footer grew by, not cut.
+            let (color, bold) = match &self.app_status.status_line {
+                StatusLine::NotificationError(_) => (self.ctx.color_theme.status_error_fg, true),
+                _ => (self.ctx.color_theme.status_warn_fg, true),
+            };
+            let mut style = Style::default().fg(color);
+            if bold {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            let lines: Vec<Line> = notification
+                .into_iter()
+                .map(|row| Line::from(Span::styled(row, style)))
+                .collect();
+            f.render_widget(
+                Paragraph::new(lines)
+                    .style(Style::default().bg(self.ctx.color_theme.bg))
+                    .block(Block::default().padding(Padding::horizontal(1))),
+                status_line_area,
+            );
+        } else {
+            self.render_status_line(f, status_line_area);
+        }
+
+        // Dir-input caret: a "block" cursor painted directly into the
+        // buffer, we overwrite the char that sits at the insertion point
+        // with the SAME char in reversed colors (theme bg on the cursor's
+        // accent color) so the letter stays visible "through" the cursor.
+        // The real terminal caret is hidden on overlay-open so it can't be
+        // teleported around by graph/avatar image escapes, the block on
+        // screen is always exactly where we paint it.
+        //
+        // Blinking is driven manually off `spinner_frame` (Tick fires every
+        // ~100ms while idle). A 12-frame cycle (600 ms on / 600 ms off)
+        // feels closer to a relaxed hardware text-caret rate.
+        // `Modifier::SLOW_BLINK` is ignored by most modern terminals, so we
+        // don't rely on it.
+        if self.dir_input.active {
+            if let Some((anchor_x, anchor_y)) = self.dir_input_cursor_anchor.take() {
+                let before_count =
+                    self.dir_input.text[..self.dir_input.cursor].chars().count() as u16;
+                let cursor_x = anchor_x + 5 + before_count;
+                // Char to highlight: the one to the right of the cursor, or
+                // a space when the cursor is past the end of the input.
+                let cursor_char: String = self.dir_input.text[self.dir_input.cursor..]
+                    .chars()
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| " ".to_string());
+                let blink_on = (self.app_status.spinner_frame % 12) < 6;
+                if blink_on {
+                    // `virtual_cursor_fg` is `Color::Reset` in every shipped
+                    // theme, using it as bg produces a transparent block
+                    // Inverted cursor, bg = theme.fg, fg = theme.bg.
+                    // Tracks the active theme so the block stays
+                    // visible on both light and dark palettes.
+                    let style = Style::default()
+                        .fg(self.ctx.color_theme.bg)
+                        .bg(self.ctx.color_theme.fg);
+                    f.buffer_mut()
+                        .set_string(cursor_x, anchor_y, &cursor_char, style);
+                }
+                // blink_on == false: paint nothing, the input-line render
+                // above already drew the underlying char with its normal
+                // style, so that's the "off" half of the blink.
+            }
+        }
+    }
+}
+
+impl App<'_> {
+    /// Translate (col, row) into a suggestion index inside the dropdown.
+    /// Returns `None` for clicks outside the popup body (border, header
+    /// row, or outside the rectangle entirely).
+    fn dir_dropdown_hit(&self, col: u16, row: u16) -> Option<usize> {
+        let area = self.dir_dropdown_area?;
+        if col < area.x || col >= area.x + area.width || row < area.y || row >= area.y + area.height
+        {
+            return None;
+        }
+        // Skip the top + bottom border rows.
+        if row == area.y || row == area.y + area.height - 1 {
+            return None;
+        }
+        let row_inside = (row - area.y - 1) as usize;
+        let idx = self.dir_input.scroll + row_inside;
+        if idx < self.dir_input.suggestions.len() {
+            Some(idx)
+        } else {
+            None
+        }
+    }
+
+    /// Dropdown rendered below the header while the `d` overlay is open.
+    /// Anchored to the top-left of the view area, capped at `MAX_VISIBLE`
+    /// suggestion rows; scrolling kicks in beyond that.
+    fn render_dir_dropdown(&mut self, f: &mut Frame, view_area: Rect) {
+        use ratatui::{
+            layout::Rect,
+            style::Style,
+            text::{Line, Span},
+            widgets::{Block, Borders, Paragraph},
+        };
+
+        let suggestions = &self.dir_input.suggestions;
+        let theme = &self.ctx.color_theme;
+        let visible_count = suggestions.len().min(crate::dir_input::MAX_VISIBLE);
+        // Cap height: visible rows + 2 border rows (or 1+2 when empty so the
+        // placeholder hint still has room).
+        let inner_rows = visible_count.max(1);
+        let height = ((inner_rows + 2) as u16).min(view_area.height);
+        // Width: capped so the popup never bleeds past the commit-message
+        // column into the avatar / author / hash / date columns on the
+        // right. Their cells stay visible and the avatar Kitty placements
+        // stay alive (we never delete them on resize). 60% of the view
+        // width usually sits comfortably inside the commit-message column
+        // on any reasonable terminal size.
+        let width = ((view_area.width as f32 * 0.6) as u16).clamp(40, 80);
+        let width = width.min(view_area.width);
+        let area = Rect::new(view_area.x, view_area.y, width, height);
+
+        // Record the area so the run loop can react to popup growth (and
+        // re-clear the graph in the newly covered rows). The actual delete
+        // happens AFTER `terminal.draw` returns, doing it here would emit
+        // escape sequences in the middle of ratatui's flush, garbling the
+        // screen.
+        self.dir_dropdown_area = Some(area);
+
+        // Clear the cell buffer so we don't bleed terminal content through.
+        // `Cell::reset()` zeroes EVERY style component first, using
+        // `set_style` alone leaves `fg` untouched when the passed style only
+        // specifies `bg`, and Kitty's Unicode-placeholder protocol encodes
+        // the image ID in the foreground colour: a leftover fg is enough
+        // for Kitty to keep painting the commit-graph image on top of the
+        // popup. Explicit reset -> set the bg -> set the char.
+        //
+        // Clear only what the popup covers (plus its margin). The view under it
+        // is redrawn in full every frame, so nothing stale remains when the
+        // popup shrinks, and the commit rows below it stay readable.
+        let clear_height = area.height;
+        let popup_bg = theme.bg;
+        // One more column on the right and one more row below stay empty, like
+        // the margin of every popup (the top and left sides touch the edge of
+        // the view).
+        let clear_bottom = (area.y + clear_height + 1).min(view_area.y + view_area.height);
+        let clear_right = (area.x + width + 1).min(view_area.x + view_area.width);
+        for y in area.y..clear_bottom {
+            for x in area.x..clear_right {
+                let cell = &mut f.buffer_mut()[(x, y)];
+                cell.reset();
+                cell.set_style(Style::default().bg(popup_bg));
+                cell.set_char(' ');
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.list_head_fg))
+            .style(Style::default().bg(theme.bg));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if suggestions.is_empty() {
+            let hint = Line::from(Span::styled(
+                "  type a path or pick from recents…",
+                Style::default()
+                    .fg(theme.divider_fg)
+                    .add_modifier(ratatui::style::Modifier::ITALIC),
+            ));
+            f.render_widget(Paragraph::new(hint), inner);
+            return;
+        }
+
+        let scroll = self.dir_input.scroll;
+        let end = (scroll + crate::dir_input::MAX_VISIBLE).min(suggestions.len());
+        let lines: Vec<Line> = (scroll..end)
+            .map(|i| {
+                let s = &suggestions[i];
+                let is_active = self.dir_input.selected == Some(i);
+                let bg = if is_active {
+                    theme.list_selected_bg
+                } else {
+                    theme.bg
+                };
+                // Icon column padded so both kinds line up before the `│`
+                // separator. The clock glyph renders as a single cell on most
+                // terminals while the folder emoji renders as two cells
+                // without the extra trailing space the clock rows would sit
+                // one column to the left of the folder rows.
+                let kind_prefix = match s.kind {
+                    crate::dir_input::SuggestionKind::Recent => " ⏱  ",
+                    crate::dir_input::SuggestionKind::Filesystem => " 📁 ",
+                };
+                let kind_fg = match s.kind {
+                    crate::dir_input::SuggestionKind::Recent => theme.list_date_fg,
+                    crate::dir_input::SuggestionKind::Filesystem => theme.list_name_fg,
+                };
+                Line::from(vec![
+                    Span::styled(kind_prefix.to_string(), Style::default().fg(kind_fg).bg(bg)),
+                    Span::styled(
+                        "│ ".to_string(),
+                        Style::default().fg(theme.divider_fg).bg(bg),
+                    ),
+                    // A long path keeps its last directories: they tell which one it is.
+                    Span::styled(
+                        crate::text_fit::ellipsize_path(
+                            &s.display,
+                            (inner.width as usize).saturating_sub(6 + 1),
+                        ),
+                        Style::default().fg(theme.fg).bg(bg),
+                    ),
+                ])
+            })
+            .collect();
+
+        f.render_widget(Paragraph::new(lines), inner);
+
+        // Tiny scroll indicator in the right border when there's more to see.
+        if suggestions.len() > crate::dir_input::MAX_VISIBLE {
+            let total = suggestions.len();
+            let position_label = format!(" {}/{} ", end, total);
+            // Drop it on the top border so it doesn't compete with content rows.
+            if position_label.chars().next().is_some() {
+                let label_x = area.x
+                    + area
+                        .width
+                        .saturating_sub(position_label.chars().count() as u16 + 2);
+                let label_y = area.y;
+                for (x, c) in (label_x..).zip(position_label.chars()) {
+                    if x >= area.x + area.width {
+                        break;
+                    }
+                    f.buffer_mut()[(x, label_y)].set_char(c).set_style(
+                        Style::default()
+                            .fg(theme.list_head_fg)
+                            .bg(theme.bg)
+                            .add_modifier(ratatui::style::Modifier::BOLD),
+                    );
+                }
+            }
+        }
+    }
+
+    fn render_header(&mut self, f: &mut Frame, area: Rect) {
+        self.ci_dot_rect = None;
+        self.ci_dot_run = None;
+        use ratatui::{
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+
+        // Derive a tilde-relative path from the current working directory.
+        let cwd = crate::paths::simplify(
+            std::env::current_dir().unwrap_or_else(|_| self.repository.path().to_path_buf()),
+        );
+        let home = crate::paths::home_dir();
+        let display_path =
+            if let Some(rest) = home.as_deref().and_then(|h| cwd.strip_prefix(h).ok()) {
+                if rest.as_os_str().is_empty() {
+                    "~".to_string()
+                } else {
+                    format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
+                }
+            } else {
+                cwd.to_string_lossy().to_string()
+            };
+
+        // Repo name (last component) in bold, rest dimmer.
+        let repo_name = cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let path_prefix =
+            if display_path.ends_with(&repo_name) && repo_name.len() < display_path.len() {
+                display_path[..display_path.len() - repo_name.len()].to_string()
+            } else {
+                String::new()
+            };
+
+        // Right icon area: [logo] [gap] [wordmark] , or text fallback (9 cols).
+        let has_brand = self.brand_logo.is_some() && self.brand_wordmark.is_some();
+        let icon_cell_width = if has_brand {
+            crate::brand::LOGO_CELL_WIDTH as u16
+                + crate::brand::GAP_COLS
+                + crate::brand::WORDMARK_CELL_WIDTH as u16
+        } else {
+            9u16
+        };
+
+        // Numeric prefix (vim-style count, e.g. "10" before `j` to skip 10
+        // commits). Rendered in the header to the left of the logo, separated
+        // by a vertical bar, when empty, no extra space is reserved and the
+        // layout falls back to the previous path-then-logo arrangement.
+        let prefix_str = self.app_status.numeric_prefix.as_str();
+        let prefix_block_width: u16 = if prefix_str.is_empty() {
+            0
+        } else {
+            // <digits> + " │ " (3 cells: space, bar, space)
+            prefix_str.chars().count() as u16 + 3
+        };
+        let [content_row, separator_row] = ratatui::layout::Layout::vertical([
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+        ])
+        .areas(area);
+
+        // Content row: path left, [optional prefix block | icon] right.
+        let [left_area, right_area] = ratatui::layout::Layout::horizontal([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(icon_cell_width + 2 + prefix_block_width),
+        ])
+        .areas(content_row);
+
+        // Sub-split the right side into [prefix_area, icon_area] so the icon
+        // rendering below keeps using its own dedicated rectangle.
+        let [prefix_area, right_area] = ratatui::layout::Layout::horizontal([
+            ratatui::layout::Constraint::Length(prefix_block_width),
+            ratatui::layout::Constraint::Length(icon_cell_width + 2),
+        ])
+        .areas(right_area);
+
+        // Header text uses theme-aware colors so the path stays readable
+        // on light themes too. Hardcoded white/Rgb(160,160,160) here
+        // would render invisible on Catppuccin Latte / Solarized Light
+        // / Gruvbox Light / etc.
+        let path_fg = self.ctx.color_theme.fg;
+        let path_prefix_fg = self.ctx.color_theme.detail_label_fg;
+
+        // When the dir-input overlay is active, replace the pwd display with
+        // an editable text line. The real terminal cursor is positioned via
+        // `f.set_cursor_position` at the END of `render()` (after every
+        // other component has drawn) so neither the popup buffer overwrite
+        // nor the Kitty image placements moves it around mid-frame.
+        if self.dir_input.active {
+            let accent = self.ctx.color_theme.list_head_fg;
+            let input_line = Line::from(vec![
+                Span::styled(
+                    " cd ".to_string(),
+                    ratatui::style::Style::default()
+                        .fg(accent)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(" ".to_string(), ratatui::style::Style::default()),
+                Span::styled(
+                    self.dir_input.text.clone(),
+                    ratatui::style::Style::default().fg(path_fg),
+                ),
+            ]);
+            f.render_widget(Paragraph::new(input_line), left_area);
+            // Remember the cursor anchor so the main `render()` method can
+            // place the cursor as the very last thing it does.
+            self.dir_input_cursor_anchor = Some((left_area.x, left_area.y));
+        } else {
+            // Path: dim prefix + bold repo name. The prefix is cut by its
+            // middle when the CI dot (3 cells) or a narrow terminal need the
+            // room, so the repo name always stays whole.
+            let ci = self.ci_dot();
+            let layout = header_path_layout(
+                &path_prefix,
+                &repo_name,
+                left_area.width as usize,
+                ci.is_some(),
+            );
+            let mut path_spans = vec![Span::styled(
+                format!(" {}", layout.prefix),
+                ratatui::style::Style::default().fg(path_prefix_fg),
+            )];
+            path_spans.push(Span::styled(
+                repo_name,
+                ratatui::style::Style::default()
+                    .fg(path_fg)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ));
+            if let (Some((glyph, color, run)), Some(offset)) = (ci, layout.dot_offset) {
+                // A small dot between the path and what runs: ` · ` fills the
+                // whole gap.
+                path_spans.push(Span::styled(
+                    " · ",
+                    ratatui::style::Style::default().fg(path_prefix_fg),
+                ));
+                path_spans.push(Span::styled(
+                    glyph,
+                    ratatui::style::Style::default()
+                        .fg(color)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ));
+                // The name of the workflow that runs, dark and discreet,
+                // when there is room for it.
+                let label = ci_label(&run.workflow, offset, left_area.width as usize);
+                let mut click_width = 3u16;
+                if let Some(text) = label {
+                    click_width += 1 + console::measure_text_width(&text) as u16;
+                    // Light when the mouse is over it: it can be clicked.
+                    let label_fg = if self.ci_dot_hovered {
+                        self.ctx.color_theme.fg
+                    } else {
+                        path_prefix_fg
+                    };
+                    path_spans.push(Span::styled(
+                        format!(" {text}"),
+                        ratatui::style::Style::default().fg(label_fg),
+                    ));
+                }
+                if self.ci_dot_clickable() {
+                    let dot_x = left_area.x + offset as u16;
+                    self.ci_dot_rect = Some(Rect::new(
+                        dot_x.saturating_sub(1),
+                        left_area.y,
+                        click_width,
+                        1,
+                    ));
+                    self.ci_dot_run = Some(run);
+                }
+            }
+
+            f.render_widget(Paragraph::new(Line::from(path_spans)), left_area);
+        }
+
+        // Numeric prefix block: "<digits> │ " right before the logo. Rendered
+        // here (not in the footer) so the user sees the count where their eye
+        // already tracks the brand. Empty prefix → empty area, no bar shown.
+        if !prefix_str.is_empty() {
+            let prefix_line = Line::from(vec![
+                Span::styled(
+                    prefix_str,
+                    ratatui::style::Style::default()
+                        .fg(self.ctx.color_theme.status_input_transient_fg)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    " │ ",
+                    ratatui::style::Style::default().fg(self.ctx.color_theme.divider_fg),
+                ),
+            ]);
+            f.render_widget(
+                Paragraph::new(prefix_line).alignment(ratatui::layout::Alignment::Right),
+                prefix_area,
+            );
+        }
+
+        // Fill the icon area with the theme bg BEFORE writing the logo
+        // cells. The right_area sits to the right of the path; its cells
+        // would otherwise stay at the buffer default (Color::Reset) and
+        // the terminal would render them with its own configured bg
+        // typically dark, even on light themes. That dark band leaked
+        // through the brand SVG's transparent pixels and showed up as a
+        // dark rectangle behind the logo. Painting the area with the
+        // theme bg first ensures Kitty's alpha-composite reveals the
+        // theme background.
+        f.render_widget(
+            ratatui::widgets::Block::default().bg(self.ctx.color_theme.bg),
+            right_area,
+        );
+
+        // Icon: [G logo OR spinner frame] + gap + wordmark, or text fallback.
+        // The spinner animation lives here in the header (safe zone, not the last row).
+        if has_brand {
+            // Determine current logo "identity": None = static G, Some(idx) = animation frame.
+            let logo_id: Option<usize> =
+                if self.spinner_should_show() && !self.spinner_frames.is_empty() {
+                    Some(self.app_status.spinner_frame % self.spinner_frames.len())
+                } else {
+                    None
+                };
+
+            // skip=true → ratatui never writes the cell, terminal keeps the existing image.
+            // skip=false → cell is written (uploaded/placed) when content differs from prev buffer.
+            let logo_skip = Some(logo_id) == self.header_logo_last;
+            let wordmark_skip = self.header_wordmark_rendered;
+
+            let y = content_row.top();
+
+            // Compute layout positions (must be done before taking image refs due to borrow rules).
+            let logo_cell_w = crate::brand::LOGO_CELL_WIDTH as u16;
+            let wordmark_cell_w = crate::brand::WORDMARK_CELL_WIDTH as u16;
+            let total = logo_cell_w + crate::brand::GAP_COLS + wordmark_cell_w;
+            let x_logo = right_area.right().saturating_sub(total + 1);
+            let x_wordmark = x_logo + logo_cell_w + crate::brand::GAP_COLS;
+
+            // Brand SVGs are transparent (`nobg`), and the Kitty image
+            // protocol composites over the cell BACKGROUND. With
+            // `Style::default()`, the cell bg falls through to the
+            // terminal's own default, usually dark, so on light
+            // themes a dark rectangle bleeds through behind the logo.
+            // Anchor the cells' bg to the active theme so the alpha
+            // composite reveals the theme bg instead. The bg has to be
+            // set on EVERY frame (regardless of `skip`) so a live
+            // theme switch propagates without a re-upload.
+            let theme_bg = self.ctx.color_theme.bg;
+            // Write logo cells (or just set skip=true to preserve the existing Kitty image).
+            {
+                let logo_img: &crate::protocol::PreparedImage = if let Some(fidx) = logo_id {
+                    &self.spinner_frames[fidx]
+                } else {
+                    self.brand_logo.as_ref().unwrap()
+                };
+                let buf = f.buffer_mut();
+                for (dx, ic) in logo_img.cells().iter().enumerate() {
+                    let x = x_logo + dx as u16;
+                    if x >= right_area.left() && x < right_area.right() {
+                        let cell = &mut buf[(x, y)];
+                        if !logo_skip {
+                            cell.set_symbol(ic.symbol());
+                            cell.set_style(ic.style());
+                        }
+                        cell.set_bg(theme_bg);
+                        cell.set_skip(logo_skip || ic.skip());
+                    }
+                }
+            }
+            // Write wordmark cells.
+            {
+                let wordmark_img = self.brand_wordmark.as_ref().unwrap();
+                let buf = f.buffer_mut();
+                for (dx, ic) in wordmark_img.cells().iter().enumerate() {
+                    let x = x_wordmark + dx as u16;
+                    if x >= right_area.left() && x < right_area.right() {
+                        let cell = &mut buf[(x, y)];
+                        if !wordmark_skip {
+                            cell.set_symbol(ic.symbol());
+                            cell.set_style(ic.style());
+                        }
+                        cell.set_bg(theme_bg);
+                        cell.set_skip(wordmark_skip || ic.skip());
+                    }
+                }
+            }
+            // Persist the rendered state so the next render can skip re-uploading.
+            if !logo_skip {
+                self.header_logo_last = Some(logo_id);
+            }
+            if !wordmark_skip {
+                self.header_wordmark_rendered = true;
+            }
+        } else {
+            const BRAILLE_SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let primary = crate::run_style::role_text();
+            let off_white = crate::run_style::role_dim();
+            let g_char = if self.spinner_should_show() {
+                let idx = self.app_status.spinner_frame % BRAILLE_SPINNER.len();
+                BRAILLE_SPINNER[idx]
+            } else {
+                '\u{1D5DA}'
+            };
+            let icon_line = Line::from(vec![
+                Span::styled(
+                    format!("{g_char}"),
+                    ratatui::style::Style::default()
+                        .fg(primary)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    " git",
+                    ratatui::style::Style::default()
+                        .fg(primary)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+                Span::styled(
+                    "oui ",
+                    ratatui::style::Style::default()
+                        .fg(off_white)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+            ]);
+            f.render_widget(
+                Paragraph::new(icon_line).alignment(ratatui::layout::Alignment::Right),
+                right_area,
+            );
+        }
+
+        // Separator row: full-width line. Uses the theme's divider
+        // token so it stays visible on light backgrounds too.
+        let sep = Line::from(
+            "─"
+                .repeat(area.width as usize)
+                .fg(self.ctx.color_theme.divider_fg),
+        );
+        f.render_widget(Paragraph::new(sep), separator_row);
+    }
+
+    fn render_status_line(&self, f: &mut Frame, area: Rect) {
+        // Compute view-state flags before building spans so StatusLine::None can
+        // decide whether the numeric prefix goes before or after the HEAD info.
+        let is_search_active = self.view.is_search_active();
+        let is_search_querying = self.view.is_search_querying();
+        let is_config_active = self.view.is_config_active();
+        // 2-commit compare flow: when a mark is active in the list view, the
+        // entire footer swaps over to a dedicated mode, left side shows the
+        // "Comparison: <a> → <b>" indicator (with the cursor side updating
+        // live as the user navigates), right side replaces the usual shortcut
+        // bar with compare-specific actions.
+        let compare_pending = self.view.list_compare_pending();
+        // The enhanced right-side bar (HEAD info, branch, ahead/behind,
+        // shortcut hints) overlays ON TOP of the status text. We only
+        // keep it when the left side is empty (`StatusLine::None`),
+        // otherwise a long notification ("Opened https://…") collides
+        // with the bar and the user sees both layers mashed together.
+        // Integrated terminal: the footer reports the shell instead.
+        // A notification ("Copied 12 chars to clipboard") takes the place of
+        // the shell's status while it is shown.
+        let terminal_footer = match &self.view {
+            View::Terminal(t)
+                if !self.dir_input.active
+                    && matches!(&self.app_status.status_line, StatusLine::None) =>
+            {
+                let kb = &self.ctx.keybind;
+                Some(crate::view::terminal::terminal_footer(
+                    &t.session().status(),
+                    &crate::view::terminal::FooterKeys {
+                        back: kb.primary_scoped_key(&["terminal"], "back"),
+                    },
+                ))
+            }
+            _ => None,
+        };
+        let show_enhanced = matches!(&self.app_status.status_line, StatusLine::None)
+            && !is_search_active
+            && !is_config_active
+            && compare_pending.is_none()
+            && !self.dir_input.active
+            && terminal_footer.is_none();
+
+        let mut spans = if let Some((left, tone, _)) = &terminal_footer {
+            let color = match tone {
+                crate::view::terminal::FooterTone::Info => self.ctx.color_theme.status_info_fg,
+                crate::view::terminal::FooterTone::Error => self.ctx.color_theme.status_error_fg,
+            };
+            vec![Span::styled(
+                left.clone(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )]
+        } else if self.dir_input.active {
+            // Transient validation error (e.g. "not a git repository") wins
+            // over the regular "Changing directory…" idle text for ~2 s.
+            // After that we fall back to the spinner without closing the
+            // overlay so the user can pick a different target.
+            let show_error = self
+                .dir_error_message
+                .as_ref()
+                .filter(|(_, t)| t.elapsed() < std::time::Duration::from_secs(2))
+                .map(|(msg, _)| msg.clone());
+            if let Some(msg) = show_error {
+                vec![Span::styled(
+                    format!(" {}", msg),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_error_fg)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            } else {
+                // Same braille spinner used by Pull / Fetch background jobs,
+                // ticked off `spinner_frame` so it matches the header G-logo
+                // animation cadence.
+                const FRAMES: [&str; 10] = [
+                    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
+                    "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                ];
+                let frame = FRAMES[self.app_status.spinner_frame % 10];
+                vec![Span::styled(
+                    format!("{frame} Changing directory…"),
+                    Style::default()
+                        .fg(self.ctx.color_theme.status_info_fg)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            }
+        } else {
+            match &self.app_status.status_line {
+                // Numeric prefix is now rendered in the header (left of the logo),
+                // so the footer's None branch is empty regardless of prefix state.
+                StatusLine::None => vec![],
+                StatusLine::Input(msg, _, transient_msg) => {
+                    let msg_w = console::measure_text_width(msg.as_str());
+                    if let Some(t_msg) = transient_msg {
+                        let t_msg_w = console::measure_text_width(t_msg.as_str());
+                        let pad_w = area.width as usize - msg_w - t_msg_w - 2;
+                        vec![
+                            Span::styled(
+                                msg.as_str(),
+                                Style::default().fg(self.ctx.color_theme.status_input_fg),
+                            ),
+                            Span::raw(" ".repeat(pad_w)),
+                            Span::styled(
+                                t_msg.as_str(),
+                                Style::default().fg(self.ctx.color_theme.status_input_transient_fg),
+                            ),
+                        ]
+                    } else {
+                        vec![Span::styled(
+                            msg.as_str(),
+                            Style::default().fg(self.ctx.color_theme.status_input_fg),
+                        )]
+                    }
+                }
+                StatusLine::NotificationInfo(msg) => {
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default().fg(self.ctx.color_theme.status_info_fg),
+                    )]
+                }
+                StatusLine::SearchStatus { msg, warn } => {
+                    // Same color tokens as NotificationInfo / NotificationWarn,
+                    // but the variant is excluded from the 2 s auto-clear loop
+                    // so the "Match X of Y" footer stays visible for as long
+                    // as the search is applied.
+                    let color = if *warn {
+                        self.ctx.color_theme.status_warn_fg
+                    } else {
+                        self.ctx.color_theme.status_info_fg
+                    };
+                    vec![Span::styled(msg.as_str(), Style::default().fg(color))]
+                }
+                StatusLine::NotificationSuccess(msg) => {
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_success_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::NotificationWarn(msg) => {
+                    vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_warn_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::NotificationError(msg) => {
+                    vec![Span::styled(
+                        format!("ERROR: {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_error_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+                StatusLine::Spinner(msg) => {
+                    // The G animation plays in the header logo, status bar is text-only.
+                    const FRAMES: [&str; 10] = [
+                        "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}",
+                        "\u{2826}", "\u{2827}", "\u{2807}", "\u{280f}",
+                    ];
+                    let frame = FRAMES[self.app_status.spinner_frame % 10];
+                    vec![Span::styled(
+                        format!("{frame} {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_info_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]
+                }
+            }
+        };
+
+        let dim_separator = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let dim_text = Style::default().fg(self.ctx.color_theme.list_ref_paren_fg);
+        let show_shortcuts = matches!(&self.app_status.status_line, StatusLine::None)
+            || is_search_active
+            || is_config_active;
+        let _is_diff = matches!(&self.view, View::Diff(_));
+
+        let status_area = if show_shortcuts || self.dir_input.active || terminal_footer.is_some() {
+            let shortcut_text: String = if let Some((_, _, right)) = &terminal_footer {
+                right.clone()
+            } else if self.dir_input.active {
+                // Dedicated cd-mode hints, only the keys that actually do
+                // something while the overlay is open. The animated label
+                // lives on the LEFT side (see the spans build above).
+                "⌘ ↑↓:navigate▕▏Tab:complete▕▏↵:cd▕▏Esc:cancel".into()
+            } else if is_search_querying {
+                String::new()
+            } else if is_search_active {
+                let (ignore_case, fuzzy, regex) = self
+                    .view
+                    .search_case_fuzzy_regex()
+                    .unwrap_or((false, false, false));
+                // ON = case-sensitive (ignore_case=false), OFF = case-insensitive (ignore_case=true)
+                let case_str = if ignore_case { "[OFF]" } else { "[ON]" };
+                let fuzzy_str = if fuzzy { "[ON]" } else { "[OFF]" };
+                let regex_str = if regex { "[ON]" } else { "[OFF]" };
+                let kb = &self.ctx.keybind;
+                let case_k = kb.primary_global_key(UserEvent::IgnoreCaseToggle);
+                let fuzzy_k = kb.primary_global_key(UserEvent::FuzzyToggle);
+                // Regex toggle reuses the `Discard` event (see
+                // `view::list::set_search_regex`), no dedicated
+                // UserEvent. Look that up so a `discard` rebind
+                // surfaces here too.
+                let regex_k = kb.primary_global_key(UserEvent::Discard);
+                format!(
+                    "⌘ {case_k}:case{case_str}▕▏{fuzzy_k}:fuzzy{fuzzy_str}▕▏{regex_k}:regex{regex_str}▕▏⇆:cycle▕▏Esc:clear"
+                )
+            } else if is_config_active {
+                self.view
+                    .config_footer_hint()
+                    .unwrap_or_else(|| "⌘ ↵/⇆:cycle".into())
+            } else if compare_pending.is_some() {
+                // Dedicated compare-pending shortcut bar, completely
+                // replaces the usual list view shortcuts so the user knows
+                // unambiguously which actions are relevant in this mode.
+                "⌘ Space:compare▕▏↑↓:navigate▕▏Esc:cancel".into()
+            } else {
+                let kb = &self.ctx.keybind;
+                let g = |event: UserEvent, label: &str| -> String {
+                    let k = kb.primary_global_key(event);
+                    if k.is_empty() {
+                        label.to_string()
+                    } else {
+                        format!("{k}:{label}")
+                    }
+                };
+                match &self.view {
+                    View::List(_) => {
+                        // `c` / `C` (copy msg / hash) are deliberately kept
+                        // functional but omitted from the footer hint to
+                        // reduce clutter. They're discoverable via `?:help`.
+                        // `R:PRs` and `I:Issues` only appear when BOTH the
+                        // user is logged in to GitHub AND the repo has a
+                        // GitHub-hosted remote.
+                        let mut parts = vec![
+                            g(UserEvent::Search, "search"),
+                            g(UserEvent::RefList, "refs"),
+                            g(UserEvent::Refresh, "fetch"),
+                        ];
+                        parts.push(g(UserEvent::Drop, "cd"));
+                        let terminal_key = kb.primary_scoped_key(&["list"], "terminal");
+                        if !terminal_key.is_empty() {
+                            parts.push(format!("{terminal_key}:term"));
+                        }
+                        parts.push(g(UserEvent::HelpToggle, "help"));
+                        parts.push(g(UserEvent::Quit, "quit"));
+                        format!("⌘ {}", parts.join("▕▏"))
+                    }
+                    View::Diff(_) => self
+                        .view
+                        .diff_footer_hint()
+                        .unwrap_or_else(|| format!("⌘ {}", g(UserEvent::FullCopy, "copy-path"))),
+                    View::Detail(_) => format!(
+                        "⌘ ⇆:prev/next▕▏{}▕▏{}▕▏{}▕▏{}",
+                        g(UserEvent::FileHistory, "history"),
+                        g(UserEvent::FullCopy, "msg"),
+                        g(UserEvent::ShortCopy, "hash"),
+                        g(UserEvent::Refresh, "fetch"),
+                    ),
+                    View::Refs(_) => format!(
+                        "⌘ {}▕▏{}▕▏{}▕▏{}",
+                        g(UserEvent::DeleteBranch, "delete"),
+                        g(UserEvent::FullCopy, "copy-name"),
+                        g(UserEvent::Refresh, "fetch"),
+                        g(UserEvent::HelpToggle, "help"),
+                    ),
+                    View::Help(_) => format!("⌘ {}", g(UserEvent::HelpToggle, "close")),
+                    View::UserCommand(_) => format!(
+                        "⌘ {}▕▏{}",
+                        g(UserEvent::HelpToggle, "help"),
+                        g(UserEvent::Refresh, "fetch"),
+                    ),
+                    View::Dialog(_) => "⌘ Tab:focus▕▏↵:confirm".into(),
+                    // All branch / tag actions live in the right-hand action
+                    // bar, see `LOCAL_BRANCH_ACTIONS` / `REMOTE_BRANCH_ACTIONS`
+                    // / `TAG_ACTIONS`. The footer only keeps what's NOT in the
+                    // panel (fetch).
+                    View::BranchDetail(_) => format!("⌘ {}", g(UserEvent::Refresh, "fetch")),
+                    View::TagDetail(_) => format!("⌘ {}", g(UserEvent::Refresh, "fetch")),
+                    View::Uncommitted(_) => self.view.uncommitted_footer_hint().unwrap_or_default(),
+                    View::FileHistory(_) => self
+                        .view
+                        .file_history_footer_hint()
+                        .unwrap_or_else(|| "⌘ Esc:close".into()),
+                    View::Blame(_) => self
+                        .view
+                        .blame_footer_hint()
+                        .unwrap_or_else(|| "⌘ Esc:close".into()),
+                    View::Compare(_) => self
+                        .view
+                        .compare_footer_hint()
+                        .unwrap_or_else(|| "⌘ Tab:focus▕▏↑↓:navigate▕▏Esc:close".into()),
+                    View::Conflict(_) => self
+                        .view
+                        .conflict_footer_hint()
+                        .unwrap_or_else(|| "⌘ o/t/b/B:pick▕▏n/p:nav▕▏↵:save▕▏Esc:cancel".into()),
+                    View::InteractiveRebase(_) => self
+                        .view
+                        .interactive_rebase_footer_hint()
+                        .unwrap_or_else(|| {
+                            "⌘ p/r/e/s/f/d:action▕▏Shift+↑↓:move▕▏↵:apply▕▏Esc:cancel".into()
+                        }),
+                    View::PullRequests(_) => self
+                        .view
+                        .pull_requests_footer_hint()
+                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏Tab:focus▕▏r:reload▕▏Esc:close".into()),
+                    View::Actions(_) => self.view.actions_footer_hint().unwrap_or_default(),
+                    View::Issues(_) => self
+                        .view
+                        .issues_footer_hint()
+                        .unwrap_or_else(|| "⌘ ↑↓:nav▕▏↵:open▕▏Tab:filter▕▏Esc:close".into()),
+                    _ => "⌘ f:search▕▏Tab:refs▕▏?:help▕▏q:quit▕▏r:fetch".into(),
+                }
+            };
+
+            // The hints never push the HEAD info out: they lose their last
+            // entries first when the window is narrow.
+            let shortcut_text = crate::text_fit::fit_hints(
+                &shortcut_text,
+                (area.width as usize).saturating_sub(4 + 14),
+            );
+            let shortcut_display_width = crate::text_fit::width(&shortcut_text) as u16;
+            let right_constraint = Constraint::Length(shortcut_display_width + 4);
+            let [left_area, right_area] =
+                Layout::horizontal([Constraint::Min(0), right_constraint]).areas(area);
+            let shortcut_spans = vec![Span::styled(shortcut_text, dim_text)];
+            let shortcut_line = Line::from(shortcut_spans);
+            let shortcut_paragraph = Paragraph::new(shortcut_line)
+                .style(Style::default().bg(self.ctx.color_theme.bg))
+                .alignment(Alignment::Right)
+                .block(Block::default().padding(Padding::horizontal(1)));
+
+            f.render_widget(shortcut_paragraph, right_area);
+
+            if is_config_active {
+                let config_hint_line = match &self.app_status.status_line {
+                    StatusLine::NotificationSuccess(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_success_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    StatusLine::NotificationError(msg) => Line::from(vec![Span::styled(
+                        format!("ERROR: {msg}"),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_error_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    StatusLine::NotificationInfo(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default().fg(self.ctx.color_theme.status_info_fg),
+                    )]),
+                    StatusLine::NotificationWarn(msg) => Line::from(vec![Span::styled(
+                        msg.as_str(),
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_warn_fg)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    _ => Line::from(vec![Span::styled(
+                        "Changes are applied to your config.toml",
+                        dim_text,
+                    )]),
+                };
+                let config_hint_line = Line::from(crate::text_fit::ellipsize_spans(
+                    config_hint_line.spans,
+                    (left_area.width as usize).saturating_sub(2),
+                ));
+                let config_hint_paragraph = Paragraph::new(config_hint_line)
+                    .style(Style::default().bg(self.ctx.color_theme.bg))
+                    .block(Block::default().padding(Padding::horizontal(1)));
+                f.render_widget(config_hint_paragraph, left_area);
+                // We still need a valid area for the rest, use a zero-height area
+                Rect::new(left_area.x, left_area.y, 0, left_area.height)
+            } else {
+                left_area
+            }
+        } else {
+            area
+        };
+
+        // Compare-pending mode: replace the LEFT side (HEAD info + dirty
+        // counts) with the live "Comparison: marked → cursor" indicator. The
+        // selected hash slot updates on every render as the cursor moves;
+        // shows `...` when the cursor sits on the marked commit itself or on
+        // the Uncommitted row (where comparison is impossible).
+        if let Some((marked, cursor)) = compare_pending.as_ref() {
+            let short = |h: &str| h.chars().take(7).collect::<String>();
+            let marked_short = short(marked.as_str());
+            let target_short = match cursor {
+                Some(c) if c != marked => short(c.as_str()),
+                _ => "...".to_string(),
+            };
+            // The "Comparison: " label keeps the violet bg badge, it's the
+            // mode indicator. The two SHAs themselves render in the regular
+            // commit-list hash color (no bg) so they look exactly like the
+            // SHA column the user is reading from.
+            spans.push(Span::styled(
+                " Comparison: ",
+                Style::default()
+                    .fg(self.ctx.color_theme.list_compare_marked_fg)
+                    .bg(self.ctx.color_theme.list_compare_marked_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                marked_short,
+                Style::default()
+                    .fg(self.ctx.color_theme.list_hash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                " → ",
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ));
+            spans.push(Span::styled(
+                target_short,
+                Style::default()
+                    .fg(self.ctx.color_theme.list_hash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if show_enhanced {
+            // The GitHub mark, far left, tells that git_tui is connected.
+            if self.ctx.github_auth_state.is_authenticated() {
+                let mark = if self.ctx.ui_config.common.nerd_font {
+                    "\u{f09b} "
+                } else {
+                    "GH "
+                };
+                spans.push(Span::styled(
+                    mark,
+                    Style::default()
+                        .fg(self.ctx.color_theme.fg)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            match self.repository.head() {
+                Head::Branch { name } => {
+                    // The list's own table when it is on screen: `ctx` keeps
+                    // the one of the first graph, which the full load replaces.
+                    let list_colors = match &self.view {
+                        View::List(list_view) => list_view
+                            .commit_list_state_ref()
+                            .map(|state| state.branch_color_map()),
+                        _ => None,
+                    };
+                    let branch_color = list_colors
+                        .unwrap_or(&self.ctx.branch_color_map)
+                        .get(name)
+                        .copied()
+                        .unwrap_or(self.ctx.color_theme.status_info_fg);
+                    spans.push(Span::styled(
+                        "HEAD → ",
+                        Style::default()
+                            .fg(self.ctx.color_theme.list_head_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::styled("⎇ ", Style::default().fg(branch_color)));
+                    spans.push(Span::styled(
+                        name.clone(),
+                        Style::default()
+                            .fg(branch_color)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                Head::Detached { .. } => {
+                    spans.push(Span::styled(
+                        "HEAD → ",
+                        Style::default()
+                            .fg(self.ctx.color_theme.list_head_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    spans.push(Span::styled(
+                        "● detached",
+                        Style::default()
+                            .fg(self.ctx.color_theme.status_warn_fg)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                Head::None => {}
+            }
+
+            // Push/pull readiness indicator: ↑N (commits to push) / ↓N
+            // (commits to pull) appended right after the branch name.
+            // Shown only if the branch has an upstream; ✓ if in sync.
+            if let Some((ahead, behind)) = self.ctx.current_branch_remote_state {
+                if ahead == 0 && behind == 0 {
+                    spans.push(Span::styled(
+                        " ✓",
+                        Style::default().fg(self.ctx.color_theme.status_success_fg),
+                    ));
+                } else {
+                    if ahead > 0 {
+                        spans.push(Span::styled(
+                            format!(" ↑{}", ahead),
+                            Style::default().fg(self.ctx.color_theme.detail_file_change_add_fg),
+                        ));
+                    }
+                    if behind > 0 {
+                        spans.push(Span::styled(
+                            format!(" ↓{}", behind),
+                            Style::default().fg(self.ctx.color_theme.detail_file_change_delete_fg),
+                        ));
+                    }
+                }
+            }
+
+            if let Some(changes) = self.repository.uncommitted_changes() {
+                let staged = changes.staged.len();
+                let unstaged = changes.unstaged.len();
+                let untracked = changes.untracked.len();
+
+                // (Rebase-paused chip used to live here. It now anchors
+                // directly on the paused commit's row in the commit list
+                //, same pattern as the `⚠ N conflicts` / `↻ REBASING`
+                // badges on the Uncommitted row. See
+                // `widget::commit_list::render_commit_message`.)
+                if changes.is_dirty() {
+                    // No trailing space after the bar, each indicator below
+                    // already starts with a leading space, which doubles as
+                    // the separator from one indicator to the next.
+                    spans.push(Span::styled(" │", dim_separator));
+                    if staged > 0 {
+                        spans.push(Span::styled(
+                            format!(" ✓{}", staged),
+                            Style::default().fg(self.ctx.color_theme.status_success_fg),
+                        ));
+                    }
+                    if unstaged > 0 {
+                        spans.push(Span::styled(
+                            format!(" ⚡{}", unstaged),
+                            Style::default().fg(self.ctx.color_theme.status_warn_fg),
+                        ));
+                    }
+                    if untracked > 0 {
+                        spans.push(Span::styled(
+                            format!(" ?{}", untracked),
+                            Style::default().fg(self.ctx.color_theme.list_ref_stash_fg),
+                        ));
+                    }
+                }
+            }
+
+            // (Numeric prefix moved to the header, left of the logo.)
+        }
+
+        // One row: what does not fit ends with a `…`, except what is being
+        // typed, which slides so the cursor stays in view.
+        let room = (status_area.width as usize).saturating_sub(2);
+        let mut cursor_col: Option<u16> = None;
+        let spans = if let StatusLine::Input(_, Some(cp), _) = &self.app_status.status_line {
+            let (spans, col) = crate::text_fit::scroll_spans_to_cursor(spans, room, *cp as usize);
+            cursor_col = Some(col as u16);
+            spans
+        } else {
+            crate::text_fit::ellipsize_spans(spans, room)
+        };
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line)
+            .style(Style::default().bg(self.ctx.color_theme.bg))
+            .block(Block::default().padding(Padding::horizontal(1)));
+        f.render_widget(paragraph, status_area);
+
+        if let StatusLine::Input(_, Some(cursor_pos), _) = &self.app_status.status_line {
+            let (x, y) = (area.x + cursor_col.unwrap_or(*cursor_pos) + 1, area.y);
+            match &self.ctx.ui_config.common.cursor_type {
+                CursorType::Native => {
+                    f.set_cursor_position((x, y));
+                }
+                CursorType::Virtual(cursor) => {
+                    let style = Style::default().fg(self.ctx.color_theme.virtual_cursor_fg);
+                    f.buffer_mut().set_string(x, y, cursor, style);
+                }
+            }
+        }
+    }
+}
+
+impl<'a> App<'a> {
+    /// `t`: show the integrated terminal in place of the graph. The shell
+    /// starts the first time and keeps running when the terminal is hidden.
+    fn open_terminal(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
+        if matches!(self.view, View::Terminal(_)) {
+            return Ok(());
+        }
+        let area = self.app_status.view_area;
+        let (rows, cols) = (area.height.max(1), area.width.max(1));
+        let session_view = match self.shell.ensure_started(rows, cols) {
+            Ok(session) => {
+                session.resize(rows, cols);
+                session.view()
+            }
+            Err(e) => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Could not start the shell: {e}"
+                )));
+                return Ok(());
+            }
+        };
+        self.clear_image(Some(terminal))?;
+        self.clear_terminal(terminal)?;
+        self.app_status.numeric_prefix.clear();
+        let before = std::mem::take(&mut self.view);
+        self.view = View::of_terminal(before, session_view, self.ctx.clone(), self.ec.sender());
+        Ok(())
+    }
+
+    /// Back to the graph. If the shell moved to another git repository,
+    /// git_tui follows it, like after a `d`.
+    fn close_terminal(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<Option<Ret>, std::io::Error> {
+        let View::Terminal(ref mut t) = self.view else {
+            return Ok(None);
+        };
+        let session = t.session().clone();
+        let before = t.take_before_view();
+        self.view = before;
+        self.view.clear_graph_images();
+        self.clear_terminal(terminal)?;
+
+        let ended = session.status() != crate::shell::session::Status::Running;
+        if ended
+            && session
+                .lived()
+                .is_some_and(|d| d < std::time::Duration::from_secs(2))
+        {
+            self.ec.send(AppEvent::NotifyWarn(
+                "The shell exited right away, check your $SHELL".into(),
+            ));
+        }
+
+        let canonical = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+        let here = std::env::current_dir().ok().map(|p| canonical(&p));
+        if let Some(target) = session.cwd().filter(|t| t.exists()) {
+            if here.as_deref() != Some(canonical(&target).as_path()) {
+                match crate::git::find_repo_root(&target) {
+                    Some(root) if here.as_deref() != Some(canonical(&root).as_path()) => {
+                        if let Err(e) = std::env::set_current_dir(&root) {
+                            self.ec
+                                .send(AppEvent::NotifyError(format!("cd failed: {e}")));
+                        } else {
+                            self.dir_recents = crate::recents::push(&root, &self.dir_recents);
+                            self.cleanup_graph_images()?;
+                            return Ok(Some(Ret::Refresh(RefreshRequest {
+                                context: crate::view::RefreshViewContext::List {
+                                    list_context: crate::view::ListRefreshViewContext {
+                                        commit_hash: String::new(),
+                                        selected: 0,
+                                        height: 20,
+                                        scroll_to_top: true,
+                                    },
+                                    pending_notification: Some(format!(
+                                        "Switched to {}",
+                                        root.display()
+                                    )),
+                                },
+                            })));
+                        }
+                    }
+                    Some(_) => {}
+                    None => self.ec.send(AppEvent::NotifyWarn(format!(
+                        "{} is not a git directory, staying in the current repository",
+                        target.display()
+                    ))),
+                }
+            }
+        }
+        // The shell may have changed the repository.
+        self.view.refresh();
+        Ok(None)
+    }
+
+    /// Every key goes to the shell, except the one bound to `back`.
+    fn handle_terminal_key(&mut self, key: KeyEvent) -> bool {
+        let View::Terminal(t) = &mut self.view else {
+            return false;
+        };
+        if self.ctx.keybind.resolve_scoped(&["terminal"], key) == Some("back") {
+            self.ec.send(AppEvent::CloseTerminal);
+            return true;
+        }
+        // Ctrl+Shift+C is the copy shortcut of terminal emulators: it is never
+        // a key for the shell, where Ctrl+C would interrupt the running command.
+        {
+            use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+            let copy_chord = key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+                && matches!(key.code, KeyCode::Char('c' | 'C'));
+            if copy_chord {
+                return true;
+            }
+        }
+        // Shift+PageUp / PageDown / Home / End browse the history, like in
+        // most terminal emulators.
+        if key
+            .modifiers
+            .contains(ratatui::crossterm::event::KeyModifiers::SHIFT)
+        {
+            use ratatui::crossterm::event::KeyCode;
+            let page = self.app_status.view_area.height.saturating_sub(1).max(1) as isize;
+            match key.code {
+                KeyCode::PageUp => {
+                    t.scroll_by(page);
+                    return true;
+                }
+                KeyCode::PageDown => {
+                    t.scroll_by(-page);
+                    return true;
+                }
+                KeyCode::Home => {
+                    t.scroll_to_top();
+                    return true;
+                }
+                KeyCode::End => {
+                    t.snap_to_bottom();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        t.snap_to_bottom();
+        if let Some(bytes) = crate::shell::keys::encode_key(key, t.session().application_cursor()) {
+            if let Some(session) = self.shell.session() {
+                session.send_input(&bytes);
+            }
+        }
+        true
+    }
+
+    /// Mouse over the terminal: forwarded to programs that asked for it,
+    /// otherwise the wheel scrolls the history.
+    fn handle_terminal_mouse(&mut self, mouse: ratatui::crossterm::event::MouseEvent) -> bool {
+        use ratatui::crossterm::event::MouseEventKind;
+        let View::Terminal(t) = &mut self.view else {
+            return false;
+        };
+        let zone = self.app_status.view_area;
+        let inside = mouse.column >= zone.x
+            && mouse.column < zone.x + zone.width
+            && mouse.row >= zone.y
+            && mouse.row < zone.y + zone.height;
+        if let Some((mode, encoding)) = t.session().mouse_protocol() {
+            if inside {
+                if let Some(bytes) = crate::shell::keys::encode_mouse(
+                    mouse.kind,
+                    mouse.modifiers,
+                    mouse.column - zone.x,
+                    mouse.row - zone.y,
+                    mode,
+                    encoding,
+                ) {
+                    if let Some(session) = self.shell.session() {
+                        session.send_input(&bytes);
+                    }
+                }
+            }
+            return true;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp => t.scroll_by(3),
+            MouseEventKind::ScrollDown => t.scroll_by(-3),
+            _ => {}
+        }
+        true
+    }
+
+    /// Mouse selection, in every view (see `crate::selection`): `Ctrl` + drag
+    /// selects the text under the pointer, and the text is copied when the
+    /// button is released, with a "Copied" message in the footer. The
+    /// selection is only there while dragging.
+    ///
+    /// A plain drag, a click and the wheel are the views' own, and `Shift` +
+    /// drag is the terminal's selection: none of them is touched. A
+    /// `Ctrl` + click (the compare mark of the commit list) is handed to the
+    /// view when the button comes up on the cell it went down on.
+    ///
+    /// Not used while a program in the integrated terminal asks for the
+    /// mouse: it gets the events.
+    fn select_with_mouse(
+        &mut self,
+        mouse: ratatui::crossterm::event::MouseEvent,
+    ) -> MouseSelection {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+
+        if let View::Terminal(t) = &self.view {
+            if t.session().mouse_protocol().is_some() {
+                return MouseSelection::Ignored;
+            }
+        }
+        let here = (mouse.row, mouse.column);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left)
+                if mouse.modifiers.contains(KeyModifiers::CONTROL)
+                    && !mouse.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                // Kept back: it is a click or the start of a selection, the
+                // button coming up tells which.
+                self.text_selection = None;
+                self.mouse_press = Some(mouse);
+                // Smart mode: find the panel the press is in, now, from the
+                // screen the user is looking at. Without a frame around the
+                // press it selects like classic.
+                self.selection_bounds =
+                    match (self.ctx.core_config.selection_mode(), &self.last_frame) {
+                        (crate::SelectionMode::Smart, Some(frame)) => {
+                            crate::selection::smart_bounds(frame, (mouse.row, mouse.column))
+                        }
+                        _ => None,
+                    };
+                MouseSelection::Handled(false)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let Some(press) = self.mouse_press else {
+                    return MouseSelection::Ignored;
+                };
+                self.text_selection = Some(crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds,
+                ));
+                MouseSelection::Handled(true)
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let Some(press) = self.mouse_press.take() else {
+                    return MouseSelection::Ignored;
+                };
+                let selection = crate::selection::TextSelection::new(
+                    (press.row, press.column),
+                    here,
+                    self.selection_bounds.take(),
+                );
+                // The highlight goes away with the button.
+                self.text_selection = None;
+                if here == (press.row, press.column) {
+                    return MouseSelection::Click(press);
+                }
+                if let Some(frame) = &self.last_frame {
+                    let text = crate::selection::selected_text(frame, &selection);
+                    if !text.is_empty() {
+                        self.copy_selection(text);
+                    }
+                }
+                MouseSelection::Handled(true)
+            }
+            _ => MouseSelection::Ignored,
+        }
+    }
+
+    /// Puts selected text on the clipboard and says so in the footer.
+    fn copy_selection(&mut self, text: String) {
+        let count = text.chars().count();
+        let unit = if count == 1 { "char" } else { "chars" };
+        self.copy_raw_to_clipboard(text, format!("Copied {count} {unit} to clipboard"));
+    }
+}
+
+/// What `App::select_with_mouse` did with a mouse event.
+enum MouseSelection {
+    /// Not for the selection: the view handles it.
+    Ignored,
+    /// Used by the selection; the flag says whether the screen must be redrawn.
+    Handled(bool),
+    /// `Ctrl` + click, not a drag: the held-back press, to hand to the view
+    /// (the release that follows is handled as usual).
+    Click(ratatui::crossterm::event::MouseEvent),
+}
+
+const HEADER_HEIGHT: u16 = 2;
+
+/// Where the path text and the CI dot go in the left part of the header.
+#[derive(Debug, PartialEq, Eq)]
+struct PathLayout {
+    /// The directory part, shortened by its middle when the room is short.
+    prefix: String,
+    /// Column of the dot from the left edge, `None` when it does not fit
+    /// (or is not shown).
+    dot_offset: Option<usize>,
+}
+
+/// Cells between the repo name and the CI dot (filled by ` · `).
+const CI_GAP: usize = 3;
+
+/// ` <prefix><repo>   <dot>`: the repo name always stays whole, the dot sits
+/// after the path (a gap, the dot, and a margin are reserved).
+fn header_path_layout(
+    path_prefix: &str,
+    repo_name: &str,
+    left_width: usize,
+    with_dot: bool,
+) -> PathLayout {
+    let reserve = if with_dot { CI_GAP + 2 } else { 0 };
+    let available = left_width.saturating_sub(1 + reserve);
+    let repo_width = console::measure_text_width(repo_name);
+    let prefix = shorten_path_prefix(path_prefix, available.saturating_sub(repo_width));
+    let text_width = 1 + console::measure_text_width(&prefix) + repo_width;
+    let dot_offset =
+        (with_dot && text_width + CI_GAP + 2 <= left_width).then_some(text_width + CI_GAP);
+    PathLayout { prefix, dot_offset }
+}
+
+/// The workflow name shown after the CI dot: cut with an ellipsis to the room
+/// left in the header, or `None` when there is hardly any (the dot alone is
+/// enough then).
+fn ci_label(name: &str, dot_offset: usize, left_width: usize) -> Option<String> {
+    // After the dot: a space, the name, and one cell of margin.
+    let room = left_width.saturating_sub(dot_offset + 2 + 1);
+    let name = name.trim();
+    if name.is_empty() || room < 4 {
+        return None;
+    }
+    let text = crate::view::actions::logic::fit_text(name, room);
+    Some(text.trim_end().to_string())
+}
+
+/// Shortens the directory part of the path by its middle so that it fits
+/// `max` cells: `~/work/clients/` becomes `~/…/`. The start and the repo name
+/// (not part of this prefix) stay readable.
+fn shorten_path_prefix(prefix: &str, max: usize) -> String {
+    if console::measure_text_width(prefix) <= max {
+        return prefix.to_string();
+    }
+    let skip = usize::from(prefix.starts_with('/'));
+    let first_len = prefix[skip..]
+        .find('/')
+        .map_or(prefix.len(), |i| skip + i + 1);
+    let first = &prefix[..first_len];
+    let candidate = format!("{first}…/");
+    if console::measure_text_width(&candidate) <= max {
+        candidate
+    } else if max >= 2 {
+        "…/".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn split_app_areas_with_header(area: Rect, status_rows: u16) -> [Rect; 4] {
+    let [header, rest] =
+        Layout::vertical([Constraint::Length(HEADER_HEIGHT), Constraint::Min(0)]).areas(area);
+    let [view, gap, status] = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(status_rows.max(1)),
+    ])
+    .areas(rest);
+    [header, view, gap, status]
+}
+
+/// Most rows a notification may take at the bottom of the screen.
+const MAX_NOTIFICATION_ROWS: usize = 3;
+
+impl<'a> App<'a> {
+    /// The rows of the notification in the footer when it is an error or a
+    /// warning too long for one row (empty otherwise: the footer keeps its
+    /// single row). Past `MAX_NOTIFICATION_ROWS` the last row ends with `…`.
+    fn notification_rows(&self, width: u16) -> Vec<String> {
+        let text = match &self.app_status.status_line {
+            StatusLine::NotificationError(msg) => format!("ERROR: {msg}"),
+            StatusLine::NotificationWarn(msg) => msg.clone(),
+            _ => return Vec::new(),
+        };
+        // 1 column of padding on each side.
+        let room = (width as usize).saturating_sub(2).max(1);
+        let mut rows = crate::text_fit::wrap_plain(&text, room);
+        if rows.len() > MAX_NOTIFICATION_ROWS {
+            rows.truncate(MAX_NOTIFICATION_ROWS);
+            if let Some(last) = rows.last_mut() {
+                *last = crate::text_fit::ellipsize_end(&format!("{last} …"), room);
+            }
+        }
+        if rows.len() <= 1 {
+            return Vec::new();
+        }
+        rows
+    }
+
+    fn update_state(&mut self, view_area: Rect) {
+        self.app_status.view_area = view_area;
+    }
+
+    /// Mark header images as needing re-upload on next render.
+    fn invalidate_header(&mut self) {
+        self.header_logo_last = None;
+        self.header_wordmark_rendered = false;
+    }
+
+    /// Clear the terminal display and mark header images dirty for re-upload.
+    fn clear_terminal(&mut self, terminal: &mut DefaultTerminal) -> Result<(), std::io::Error> {
+        terminal.clear()?;
+        self.invalidate_header();
+        Ok(())
+    }
+
+    fn clear_image(
+        &mut self,
+        terminal: Option<&mut DefaultTerminal>,
+    ) -> Result<(), std::io::Error> {
+        // Clear prepared images so they get re-uploaded after terminal clear
+        self.view.clear_graph_images();
+        self.ctx
+            .avatar_manager
+            .lock()
+            .unwrap()
+            .clear_prepared_images();
+        // Sometimes the first image fails to render after a full screen clear
+        // As a workaround, the first area is preserved when a full clear is not required
+        if let Some(t) = terminal {
+            for y in 1..t.size()?.height {
+                self.ctx.image_protocol.clear_line(y);
+            }
+        } else {
+            self.ctx.image_protocol.clear();
+        }
+        Ok(())
+    }
+
+    fn open_detail(&mut self) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            View::UserCommand(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        let (commit, changes, refs) = selected_commit_details(self.repository, &commit_list_state);
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
+        self.view = View::of_detail(
+            commit_list_state,
+            commit,
+            changes,
+            refs,
+            head_branch_name,
+            head_commit_hash,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_detail(&mut self) -> bool {
+        // Walk the PR nav stack, when the Detail view sits on top
+        // of a PR drilldown, Esc pops one level and rebuilds the
+        // restore target instead of falling through to the commit
+        // graph. `CommitDetail` shouldn't normally appear at this
+        // depth (Detail closes to PR), but treat it the same way.
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Detail(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, Some(list_state)) {
+                    return true;
+                }
+            }
+        }
+        match self.view {
+            View::Detail(ref mut view) => {
+                let commit_list_state = view.take_list_state();
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                true
+            }
+            View::BranchDetail(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
+                }
+            }
+            View::TagDetail(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
+                }
+            }
+            View::Uncommitted(ref mut view) => {
+                if let Some(commit_list_state) = view.take_list_state() {
+                    self.view =
+                        View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn open_file_diff(&mut self, hash: String, file_path: String) {
+        // When this Detail view sits inside a PR drilldown (its
+        // restore frame is on top of the stack), push a
+        // `CommitDetail{sha=hash}` frame so the file-diff's `Esc`
+        // bounces back to *this* Detail rather than skipping to the
+        // PR. Non-PR Detail → DiffView leaves the stack untouched
+        // (and its `Esc` follows the standard chain).
+        if matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::PullRequest { .. })
+        ) {
+            self.pr_nav_stack
+                .push(PrNavRestore::CommitDetail { sha: hash.clone() });
+        }
+        if crate::git::diff::is_binary_extension(&file_path) {
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Binary file: diff not available for {}",
+                file_path
+            )));
+            return;
+        }
+        let commit_list_state = match self.view {
+            View::Detail(ref mut view) => view.take_list_state(),
+            View::Diff(ref mut view) => view.take_list_state().unwrap(),
+            _ => return,
+        };
+        let all_files = self
+            .repository
+            .commit_detail(&CommitHash::from(hash.as_str()))
+            .1
+            .iter()
+            .filter(|c| !matches!(c, crate::git::FileChange::Delete { .. }))
+            .map(|c| match c {
+                crate::git::FileChange::Add { path, .. }
+                | crate::git::FileChange::Modify { path, .. } => path.clone(),
+                crate::git::FileChange::Move { to, .. } => to.clone(),
+                crate::git::FileChange::Delete { .. } => unreachable!(),
+            })
+            .collect::<Vec<String>>();
+        let all_files = all_files.into_iter().map(|p| (p, false)).collect();
+        match DiffEntry::load_for_file(self.repository.path(), &hash, &file_path) {
+            Ok(diff_entry) => {
+                let title = format!("Diff: {}", file_path);
+                self.view = View::of_diff_with_entries(
+                    commit_list_state,
+                    vec![diff_entry],
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                    title,
+                    hash,
+                    all_files,
+                    self.repository.path().to_path_buf(),
+                );
+                let pr_origin = self.pr_origin_from_stack();
+                if let View::Diff(ref mut v) = self.view {
+                    v.set_pr_origin(pr_origin);
+                }
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_stash_diff(&mut self, stash_ref: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            View::Refs(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        let repo_path = self.repository.path().to_path_buf();
+        match DiffEntry::load_for_stash(&repo_path, &stash_ref) {
+            Ok(diff_entries) => {
+                let all_file_paths = diff_entries
+                    .iter()
+                    .filter_map(|e| e.new_path.clone().or_else(|| e.old_path.clone()))
+                    .map(|p| (p, false))
+                    .collect::<Vec<(String, bool)>>();
+                let title = format!("Stash: {}", stash_ref);
+                self.view = View::of_diff_with_entries(
+                    commit_list_state,
+                    diff_entries,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                    title,
+                    stash_ref,
+                    all_file_paths,
+                    repo_path,
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    /// Handle the 2-commit comparison flow. Detects older/newer order from
+    /// commit dates, loads `git diff <older>..<newer>`, and opens the result
+    /// in DiffView. Clears the compare mark on the way out so subsequent
+    /// Space starts a fresh selection.
+    fn open_compare_diff(&mut self, from_hash: String, to_hash: String) {
+        let mut commit_list_state = match self.view {
+            View::List(ref mut view) => view.take_list_state(),
+            _ => return,
+        };
+        // Mark is consumed on opening, UX described in the plan.
+        commit_list_state.clear_compare_mark();
+
+        let repo_path = self.repository.path().to_path_buf();
+
+        // Order detection: find both commits in the loaded list and pick the
+        // older one as the diff base. Falls back to (from, to) if either
+        // can't be located (rare, only if hashes drifted out of the loaded
+        // window between marking and confirming).
+        let (older, newer) = {
+            let from = self
+                .repository
+                .commit(&CommitHash::from(from_hash.as_str()));
+            let to = self.repository.commit(&CommitHash::from(to_hash.as_str()));
+            match (from, to) {
+                // Use author_date as the ordering key; CommitSummary
+                // doesn't carry the committer trio (that's in the on-
+                // demand full `Commit`), and author_date is what the
+                // list view already sorts on anyway.
+                (Some(f), Some(t)) if t.author_date >= f.author_date => {
+                    (from_hash.clone(), to_hash.clone())
+                }
+                (Some(_), Some(_)) => (to_hash.clone(), from_hash.clone()),
+                _ => (from_hash.clone(), to_hash.clone()),
+            }
+        };
+
+        // Load with a large context (`-U500`) up front so the
+        // "show more" buttons in the compare view actually have
+        // room to expand. The original `-U3` matched git's
+        // default but the compare-view diff pane only reveals
+        // lines already present in the parsed hunk, so a 3-line
+        // hunk could only ever show ±3 context regardless of how
+        // many times the user clicked "show more". The user saw
+        // the gap counter update visually but no new lines
+        // appeared. 500 lines per side covers virtually every
+        // realistic file diff while staying bounded.
+        match DiffEntry::load_for_commit_range(&repo_path, &older, &newer, 500) {
+            Ok(diff_entries) if !diff_entries.is_empty() => {
+                // Open the dedicated 2-pane CompareView (file list on the
+                // left, full diff of the selected file on the right). The
+                // CompareView owns the commit_list_state and rebuilds an
+                // internal DiffView on every file selection change.
+                self.view = View::of_compare(
+                    commit_list_state,
+                    diff_entries,
+                    older,
+                    newer,
+                    repo_path,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Ok(_) => {
+                self.ec.send(AppEvent::NotifyInfo(
+                    "No differences between the two commits.".into(),
+                ));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn close_diff(&mut self) {
+        self.file_stream.clear();
+        // Pop one level off the PR nav stack, DiffView typically
+        // sits on top of a CommitDetail (Esc → that detail) or a
+        // PR view (PR → file shortcut, Esc → PR).
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Diff(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, list_state) {
+                    return;
+                }
+            }
+        }
+        if let View::Diff(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state().unwrap();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        } else if let View::Compare(ref mut view) = self.view {
+            // CompareView shares CloseDiff with the regular diff close path
+            // it owns the commit list state directly and returns to List view.
+            let commit_list_state = view.take_list_state().unwrap();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn close_diff_to_detail(&mut self) {
+        // PR-driven diffs walk the stack, Esc on DiffView pops one
+        // level (typically a CommitDetail for the PR commit), so the
+        // user backs out one step at a time through the chain.
+        if let Some(top) = self.pr_nav_stack.pop() {
+            if let View::Diff(ref mut view) = self.view {
+                let list_state = view.take_list_state();
+                if self.restore_pr_nav_target(top, list_state) {
+                    return;
+                }
+            }
+        }
+        if let View::Diff(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state().unwrap();
+            let (commit, changes, refs) =
+                selected_commit_details(self.repository, &commit_list_state);
+            let head_branch_name = match self.repository.head() {
+                Head::Branch { name } => Some(name.clone()),
+                _ => None,
+            };
+            let head_commit_hash = head_commit_hash_from_repository(self.repository);
+            self.view = View::of_detail(
+                commit_list_state,
+                commit,
+                changes,
+                refs,
+                head_branch_name,
+                head_commit_hash,
+                self.ctx.clone(),
+                self.ec.sender(),
+            );
+        }
+    }
+
+    fn open_file_history(&mut self, file_path: String) {
+        // Load history FIRST, same rationale as `open_blame`: if git log
+        // errors (rare for valid paths, but possible for files outside the
+        // worktree), don't tear down the source view's state.
+        let repo_path = self.repository.path().to_path_buf();
+        let entries = match actions::file_history(&repo_path, &file_path) {
+            Ok(e) => e,
+            Err(msg) => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "File history failed: {}",
+                    msg
+                )));
+                return;
+            }
+        };
+
+        let commit_list_state = match self.view {
+            View::Diff(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Blame(ref mut view) => view.take_list_state(),
+            View::Uncommitted(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_file_history(
+            commit_list_state,
+            file_path,
+            entries,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_file_history(&mut self) {
+        if let View::FileHistory(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_blame(&mut self, file_path: String) {
+        // Load the blame BEFORE we touch the source view's state. If git
+        // blame errors (e.g. file doesn't exist in the working tree, like a
+        // path that was renamed or deleted in a later commit), the source
+        // view stays intact, taking its list_state before would leave it in
+        // a half-broken state that panics on the next render.
+        let repo_path = self.repository.path().to_path_buf();
+        let lines = match crate::git::blame::load_blame(&repo_path, &file_path) {
+            Ok(l) => l,
+            Err(msg) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Blame failed: {}", msg)));
+                return;
+            }
+        };
+
+        let commit_list_state = match self.view {
+            View::Diff(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::FileHistory(ref mut view) => view.take_list_state(),
+            View::Uncommitted(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_blame(
+            commit_list_state,
+            file_path,
+            lines,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_blame(&mut self) {
+        if let View::Blame(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            }
+        }
+    }
+
+    fn open_conflict_editor(&mut self, file_path: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let full_path = repo_path.join(&file_path);
+        let parsed = match crate::git::conflict::parse_conflict_path(&full_path) {
+            Ok(p) => p,
+            Err(e) => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Cannot read {}: {}",
+                    file_path, e
+                )));
+                return;
+            }
+        };
+        if parsed.hunk_count() == 0 {
+            self.ec.send(AppEvent::NotifyError(format!(
+                "{} has no conflict markers",
+                file_path
+            )));
+            return;
+        }
+        // Use the user's chosen relative path as the parsed file path so save
+        // resolves back to the repo-relative location.
+        let mut parsed = parsed;
+        parsed.path = file_path;
+
+        let commit_list_state = match self.view {
+            View::Uncommitted(ref mut view) => view.take_list_state(),
+            View::Diff(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_conflict(
+            commit_list_state,
+            repo_path,
+            parsed,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_conflict_editor(&mut self) {
+        if let View::Conflict(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                // Snapshot the current selection so the post-refresh view
+                // lands on the same commit row.
+                let list_context = crate::view::ListRefreshViewContext::from(&state);
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+                // FULL refresh, the repository caches uncommitted_changes,
+                // so a partial RefreshUncommitted would leave the conflict
+                // badge stale ("⚠ 1 conflict") even after the file has been
+                // staged. AppEvent::Refresh reloads the repository so the
+                // commit-list badge recomputes from fresh status data.
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context,
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    /// Non-interactive squash: combine the target commit with its parent
+    /// via the existing rebase machinery. Single notify on completion
+    /// no dialog, no editor. Refuses gracefully for initial commits,
+    /// merge commits, and when a previous rebase is unfinished (in
+    /// which case we surface the same "press A to abort" guidance the
+    /// interactive view shows).
+    fn squash_with_parent(&mut self, target: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let short = target.chars().take(7).collect::<String>();
+        match crate::git::rebase::squash_with_parent(&repo_path, &target) {
+            Ok(crate::git::rebase::RebaseOutcome::Clean) => {
+                self.ec.send(AppEvent::NotifySuccess(format!(
+                    "Squashed {} into its parent",
+                    short
+                )));
+                // Repository state changed, force a full list refresh so
+                // the collapsed history is rendered. We re-anchor at the
+                // top: the original SHA no longer exists, no point trying
+                // to preserve selection.
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    }));
+            }
+            Ok(crate::git::rebase::RebaseOutcome::Paused(msg)) => {
+                let head = msg.lines().next().unwrap_or("rebase stopped");
+                self.ec.send(AppEvent::NotifyWarn(format!(
+                    "Squash hit a conflict, {}. Open the rebase view (e) to recover.",
+                    head
+                )));
+            }
+            Ok(crate::git::rebase::RebaseOutcome::AlreadyInProgress) => {
+                self.ec.send(AppEvent::NotifyError(
+                    "A previous rebase is still in progress, abort it first.".into(),
+                ));
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Squash failed: {}", e)));
+            }
+        }
+    }
+
+    /// Open the GitHub Pull Requests view. Bails with a notification if
+    /// the user isn't authenticated, the repo has no GitHub remote, or
+    /// the initial `list_pull_requests` call fails. We do the network
+    /// call up-front (blocking) and pass the result to the view; on
+    /// success the view itself drives further fetches lazily.
+    /// Run a confirmed PR-comment delete in a worker thread. The PR
+    /// view picks up the outcome via `PullRequestActionDone` (same
+    /// channel as comment posts), which invalidates the cache and
+    /// re-fetches the PR detail.
+    fn delete_pr_comment(&mut self, comment_id_str: String, pr_number: u64, is_review: bool) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let Ok(comment_id) = comment_id_str.parse::<u64>() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result = if is_review {
+                crate::github::pr::delete_review_comment(&token, &coords, comment_id)
+            } else {
+                crate::github::pr::delete_issue_comment(&token, &coords, comment_id)
+            };
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Comment deleted".into(),
+                result,
+            });
+        });
+    }
+
+    /// Merge a PR via GitHub REST API. Method is one of "merge",
+    /// "squash", "rebase". Runs in a worker thread; result surfaced
+    /// via `PullRequestActionDone` so the PR view picks it up.
+    /// Resolve the GitHub auth + repo coordinates needed for any PR-
+    /// level API write. Returns `Some((token, coords))` when both are
+    /// configured, or `None` after sending the appropriate footer warn.
+    fn pr_action_context(&mut self) -> Option<(String, crate::github::RepoCoords)> {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return None;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return None;
+            }
+        };
+        Some((token, coords))
+    }
+
+    fn set_pull_request_state(&mut self, pr_number: u64, state: String) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        let label = if state == "closed" {
+            "Closed"
+        } else {
+            "Reopened"
+        };
+        let action_label = label.to_string();
+        std::thread::spawn(move || {
+            let result =
+                crate::github::pr::set_pull_request_state(&token, &coords, pr_number, &state);
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_draft(&mut self, pr_number: u64, node_id: String, draft: bool) {
+        let Some((token, _coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        let action_label = if draft {
+            "Converted to draft".to_string()
+        } else {
+            "Marked ready".to_string()
+        };
+        std::thread::spawn(move || {
+            let result = crate::github::pr::set_pull_request_draft(&token, &node_id, draft);
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_labels(&mut self, pr_number: u64, labels: Vec<String>) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result =
+                crate::github::pr::set_pull_request_labels(&token, &coords, pr_number, &labels);
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Labels updated".to_string(),
+                result,
+            });
+        });
+    }
+
+    fn set_pull_request_reviewers(
+        &mut self,
+        pr_number: u64,
+        to_add: Vec<String>,
+        to_remove: Vec<String>,
+    ) {
+        let Some((token, coords)) = self.pr_action_context() else {
+            return;
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            // Run the two calls sequentially, most PRs only need one
+            // of them, and chaining keeps error reporting simple.
+            let mut result: Result<(), String> = Ok(());
+            if !to_remove.is_empty() {
+                result = crate::github::pr::remove_pull_request_reviewers(
+                    &token, &coords, pr_number, &to_remove,
+                );
+            }
+            if result.is_ok() && !to_add.is_empty() {
+                result = crate::github::pr::request_pull_request_reviewers(
+                    &token, &coords, pr_number, &to_add,
+                );
+            }
+            tx.send(AppEvent::PullRequestActionDone {
+                number: pr_number,
+                action: "Reviewers updated".to_string(),
+                result,
+            });
+        });
+    }
+
+    fn merge_pull_request(&mut self, pr_number_str: String, method: String) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let Ok(number) = pr_number_str.parse::<u64>() else {
+            return;
+        };
+        let merge_method = match method.as_str() {
+            "merge" => crate::github::pr::MergeMethod::Merge,
+            "squash" => crate::github::pr::MergeMethod::Squash,
+            "rebase" => crate::github::pr::MergeMethod::Rebase,
+            _ => crate::github::pr::MergeMethod::Squash,
+        };
+        let tx = self.ec.sender();
+        let action_label = format!("Merged ({})", method);
+        std::thread::spawn(move || {
+            let result = crate::github::pr::merge_pull_request(
+                &token,
+                &coords,
+                number,
+                merge_method,
+                None,
+                None,
+            );
+            tx.send(AppEvent::PullRequestActionDone {
+                number,
+                action: action_label,
+                result,
+            });
+        });
+    }
+
+    /// Walk one frame off the PR nav stack, re-build whichever
+    /// view the frame describes. Returns `true` when the transition
+    /// happened, `false` when we couldn't honour it (e.g. missing
+    /// GitHub auth) and the caller should fall through to its
+    /// default close behaviour.
+    fn restore_pr_nav_target(
+        &mut self,
+        frame: PrNavRestore,
+        commit_list_state: Option<crate::widget::commit_list::CommitListState<'a>>,
+    ) -> bool {
+        match frame {
+            PrNavRestore::PullRequest { pr_number, .. } => {
+                let token = self.ctx.github_auth_state.token.clone().unwrap_or_default();
+                let coords = crate::github::RepoCoords::from_repo(self.repository.path());
+                if token.is_empty() {
+                    return false;
+                }
+                let Some(coords) = coords else {
+                    return false;
+                };
+                self.view = View::of_pull_requests(
+                    commit_list_state,
+                    coords,
+                    token,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+                if let View::PullRequests(ref mut v) = self.view {
+                    v.reopen_pr(pr_number);
+                }
+                true
+            }
+            PrNavRestore::CommitDetail { sha } => {
+                let commit_hash = CommitHash::from(sha.as_str());
+                let (commit, changes) = self.repository.commit_detail(&commit_hash);
+                if commit.commit_hash.as_str().is_empty() {
+                    return false;
+                }
+                let Some(list_state) = commit_list_state else {
+                    return false;
+                };
+                let refs: Vec<Ref> = self
+                    .repository
+                    .refs(&commit_hash)
+                    .into_iter()
+                    .cloned()
+                    .collect();
+                let head_branch_name = match self.repository.head() {
+                    Head::Branch { name } => Some(name.clone()),
+                    _ => None,
+                };
+                let head_commit_hash = head_commit_hash_from_repository(self.repository);
+                self.view = View::of_detail(
+                    list_state,
+                    commit,
+                    changes,
+                    refs,
+                    head_branch_name,
+                    head_commit_hash,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+                // The remaining stack frame (if any) is a
+                // PullRequest{n}, tag the Detail with that origin
+                // so its title still reads `· PR #N`.
+                let pr_origin = self.pr_origin_from_stack();
+                if let View::Detail(ref mut v) = self.view {
+                    v.set_pr_origin(pr_origin);
+                }
+                true
+            }
+        }
+    }
+
+    /// Transition from the PR view to the existing `View::Detail`
+    /// for one of the PR's commits. We:
+    /// 1. Stash the PR number in `return_to_pr` so the Detail view's
+    ///    `close` later routes back here instead of the commit graph.
+    /// 2. Snatch the PR view's stored `commit_list_state` so the
+    ///    Detail view has the same state to hand back on Esc.
+    /// 3. Spawn a background `git fetch refs/pull/<n>/head` so the
+    ///    commit + its files become available locally for the
+    ///    existing `git show`-based renderers. On completion the
+    ///    actual transition fires via `BuildPrCommitDetailView`.
+    fn open_pr_commit_detail(&mut self, pr_number: u64, sha: String, after_fetch: bool) {
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        // Push the "return to PR" frame once, the second pass of
+        // this function (post-fetch) re-enters here and would
+        // duplicate the entry otherwise.
+        if !matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::PullRequest { pr_number: n, .. }) if *n == pr_number
+        ) {
+            let head_label = self.pr_head_label(pr_number);
+            self.pr_nav_stack.push(PrNavRestore::PullRequest {
+                pr_number,
+                head_label,
+            });
+        }
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        let already_local = crate::git::load_commit_by_hash(&repo_path, &sha).is_some();
+        if already_local {
+            self.build_pr_commit_detail_view(pr_number, sha);
+            return;
+        }
+        // Re-entry post-fetch and the SHA is still missing, both
+        // git fetch passes inside `fetch_pull_request_commit` ran
+        // but didn't bring the commit in. Happens on squash-merged
+        // PRs whose branch was deleted upstream. Surface the
+        // dedicated dialog (offers an "open on GitHub" escape via
+        // the PR's commit URL) instead of spawning another fetch
+        // that would loop on the same "Fetching commit…" spinner.
+        if after_fetch {
+            self.stop_spinner();
+            self.pr_nav_stack.clear();
+            self.ec
+                .send(AppEvent::OpenDialog(DialogKind::OrphanedPrCommit {
+                    pr_number,
+                    sha,
+                    owner: coords.owner,
+                    repo: coords.repo,
+                    file_path: None,
+                }));
+            return;
+        }
+        self.start_spinner("Fetching commit…");
+        std::thread::spawn(move || {
+            let result = crate::git::fetch_pull_request_commit(
+                &repo_path,
+                &coords.owner,
+                &coords.repo,
+                pr_number,
+                &sha,
+            );
+            match result {
+                // We can't touch `self.view` from this thread, fire an
+                // event back to the main loop and let it build the
+                // Detail view there. `after_fetch: true` short-circuits
+                // the spinner loop above if the commit is still missing
+                // (the dialog fires instead).
+                Ok(()) => tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                    after_fetch: true,
+                }),
+                // Network error / git unreachable, same dialog, the
+                // user can still try GitHub web. NotifyError swallowed
+                // here so we don't surface two layers of failure.
+                Err(_) => tx.send(AppEvent::OpenPrCommitDetail {
+                    pr_number,
+                    sha,
+                    after_fetch: true,
+                }),
+            }
+        });
+    }
+
+    /// Bypass the standard `open_detail_by_hash` flow (which requires
+    /// the commit to be in the in-memory map + uses `selected_commit_
+    /// details`) and build the `View::Detail` directly from the
+    /// fetched PR commit. The Repository's `commit_detail` already
+    /// falls back to `git log -1` for unmapped commits.
+    fn build_pr_commit_detail_view(&mut self, pr_number: u64, sha: String) {
+        self.stop_spinner();
+        let commit_hash = CommitHash::from(sha.as_str());
+        let (commit, changes) = self.repository.commit_detail(&commit_hash);
+        if commit.commit_hash.as_str().is_empty() {
+            self.ec.send(AppEvent::NotifyError(format!(
+                "Cannot resolve commit {} locally.",
+                &sha[..7.min(sha.len())]
+            )));
+            self.pr_nav_stack.clear();
+            return;
+        }
+        // Reach across to whichever view holds the list state, when
+        // bouncing back from a file-diff (CommitDetail → DiffView →
+        // Esc), the Detail view owns it.
+        let commit_list_state = match self.view {
+            View::PullRequests(ref mut view) => view.take_list_state(),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Diff(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let Some(list_state) = commit_list_state else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open commit detail without a backing list state.".into(),
+            ));
+            self.pr_nav_stack.clear();
+            return;
+        };
+        let refs: Vec<Ref> = self
+            .repository
+            .refs(&commit_hash)
+            .into_iter()
+            .cloned()
+            .collect();
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
+        self.view = View::of_detail(
+            list_state,
+            commit,
+            changes,
+            refs,
+            head_branch_name,
+            head_commit_hash,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+        // Tag the view so its title row reads `Commit Details · PR #N`
+        //, keeps the PR origin visible while the user navigates files.
+        let head_label = self.pr_head_label(pr_number);
+        if let View::Detail(ref mut v) = self.view {
+            v.set_pr_origin(Some(crate::view::detail::PrOrigin {
+                number: pr_number,
+                head_label,
+            }));
+        }
+    }
+
+    /// The pull request whose commits the user is exploring, when the
+    /// current view sits in a PR drilldown. Such a commit is not in the
+    /// repository's history: the views say so instead of drawing the graph.
+    fn pr_origin_from_stack(&self) -> Option<crate::view::detail::PrOrigin> {
+        self.pr_nav_stack.iter().rev().find_map(|f| match f {
+            PrNavRestore::PullRequest {
+                pr_number,
+                head_label,
+            } => Some(crate::view::detail::PrOrigin {
+                number: *pr_number,
+                head_label: head_label.clone(),
+            }),
+            _ => None,
+        })
+    }
+
+    /// Where the commits of this pull request come from (`<user>:<branch>`
+    /// for a fork), taken from the navigation stack or from the PR page.
+    /// Empty when unknown: the note then only names the pull request.
+    fn pr_head_label(&mut self, pr_number: u64) -> String {
+        let from_stack = self.pr_nav_stack.iter().find_map(|f| match f {
+            PrNavRestore::PullRequest {
+                pr_number: n,
+                head_label,
+            } if *n == pr_number => Some(head_label.clone()),
+            _ => None,
+        });
+        from_stack
+            .filter(|l| !l.is_empty())
+            .or_else(|| {
+                self.pull_requests_view()
+                    .and_then(|v| v.head_label_of(pr_number))
+            })
+            .unwrap_or_default()
+    }
+
+    /// Transition from the PR view to the existing single-file
+    /// DiffView for one of the PR's changes. Same fetch + state save
+    /// dance as `open_pr_commit_detail`.
+    fn open_pr_file_diff(
+        &mut self,
+        pr_number: u64,
+        sha: String,
+        file_path: String,
+        after_fetch: bool,
+    ) {
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        // Synthesise a 2-level stack so Esc walks DiffView → Commit
+        // Detail (for `sha`) → PR view. Duplicate-guard on re-entry
+        // after a background fetch.
+        if !matches!(
+            self.pr_nav_stack.last(),
+            Some(PrNavRestore::CommitDetail { sha: existing }) if *existing == sha
+        ) {
+            if !matches!(
+                self.pr_nav_stack.first(),
+                Some(PrNavRestore::PullRequest { pr_number: n, .. }) if *n == pr_number
+            ) {
+                let head_label = self.pr_head_label(pr_number);
+                self.pr_nav_stack.push(PrNavRestore::PullRequest {
+                    pr_number,
+                    head_label,
+                });
+            }
+            self.pr_nav_stack
+                .push(PrNavRestore::CommitDetail { sha: sha.clone() });
+        }
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        let already_local = self
+            .repository
+            .commit(&CommitHash::from(sha.as_str()))
+            .is_some()
+            || crate::git::load_commit_by_hash(&repo_path, &sha).is_some();
+        if already_local {
+            self.open_file_diff_from_pr(sha, file_path);
+            return;
+        }
+        // Same loop-guard as `open_pr_commit_detail`: if we just
+        // came back from a fetch and the commit is still missing,
+        // the PR was squash-merged + branch deleted → open the
+        // orphan dialog so the user can jump to GitHub web for the
+        // file's diff.
+        if after_fetch {
+            self.stop_spinner();
+            self.pr_nav_stack.clear();
+            self.ec
+                .send(AppEvent::OpenDialog(DialogKind::OrphanedPrCommit {
+                    pr_number,
+                    sha,
+                    owner: coords.owner,
+                    repo: coords.repo,
+                    file_path: Some(file_path),
+                }));
+            return;
+        }
+        self.start_spinner("Fetching file…");
+        std::thread::spawn(move || {
+            let result = crate::git::fetch_pull_request_commit(
+                &repo_path,
+                &coords.owner,
+                &coords.repo,
+                pr_number,
+                &sha,
+            );
+            match result {
+                Ok(()) => {
+                    // After fetch, kick off the diff-open on the
+                    // main thread (via a dedicated event so the
+                    // worker doesn't touch UI state directly).
+                    // `after_fetch: true` is a safety belt, the
+                    // 2-pass fetch already validates the commit
+                    // landed, but the guard prevents a spinner loop
+                    // if it didn't (dialog fires instead).
+                    tx.send(AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                        after_fetch: true,
+                    });
+                }
+                // Network error / git unreachable, surface the
+                // orphan dialog so the user can fall back to GitHub
+                // web. Same path as a successful-but-empty fetch.
+                Err(_) => {
+                    tx.send(AppEvent::OpenPrFileDiff {
+                        pr_number,
+                        sha,
+                        file_path,
+                        after_fetch: true,
+                    });
+                }
+            }
+        });
+    }
+
+    fn open_file_diff_from_pr(&mut self, sha: String, file_path: String) {
+        self.stop_spinner();
+        // Reuse the standard "open diff for one file at commit"
+        // helper. It expects a commit hash + path and synthesises
+        // the DiffView with the proper old/new content from `git
+        // show`. The Detail view's commit_list_state isn't needed
+        // the standalone constructor lives on App.
+        self.open_uncommitted_or_commit_file_diff(sha, file_path);
+    }
+
+    /// Build a DiffView for `file_path` at `commit_hash` from
+    /// scratch (no commit-list state). Used when the user drills
+    /// into a file from the PR view, they're not coming from a
+    /// list of commits, so we open a "lonely" diff that returns to
+    /// the PR view on Esc via `return_to_pr`.
+    fn open_uncommitted_or_commit_file_diff(&mut self, commit_hash: String, file_path: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        let diff_entry = match crate::git::diff::DiffEntry::load_for_file(
+            &repo_path,
+            &commit_hash,
+            &file_path,
+        ) {
+            Ok(d) => d,
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("Load file diff: {}", e)));
+                return;
+            }
+        };
+        let diff_entries = vec![diff_entry];
+        let commit_list_state = match self.view {
+            View::PullRequests(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let Some(list_state) = commit_list_state else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open file diff without a backing commit list.".into(),
+            ));
+            return;
+        };
+        // List of file paths within the diff, usually just the one
+        // we're opening, but DiffView supports prev/next file nav.
+        let all_paths = vec![(file_path.clone(), true)];
+        self.view = View::of_diff_with_entries(
+            list_state,
+            diff_entries,
+            self.ctx.clone(),
+            self.ec.sender(),
+            format!("Diff: {}", file_path),
+            commit_hash,
+            all_paths,
+            repo_path,
+        );
+        let pr_origin = self.pr_origin_from_stack();
+        if let View::Diff(ref mut v) = self.view {
+            v.set_pr_origin(pr_origin);
+        }
+    }
+
+    /// True when both prerequisites for the PR / Issues views are
+    /// satisfied: the user has a valid GitHub auth token AND the
+    /// current repo has at least one GitHub-hosted remote. Drives
+    /// both the global `R`/`I` key dispatch and the footer hint
+    /// surfacing of those shortcuts.
+    fn github_features_available(&self) -> bool {
+        let has_token = self
+            .ctx
+            .github_auth_state
+            .token
+            .as_ref()
+            .is_some_and(|t| !t.is_empty());
+        has_token && self.has_github_remote
+    }
+
+    fn open_pull_requests(&mut self) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required, connect via the config view first.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        // The page is on screen at once; its list loads in the background.
+        self.view = View::of_pull_requests(
+            commit_list_state,
+            coords,
+            token,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_pull_requests(&mut self) {
+        if let View::PullRequests(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                // No prior list state, force a fresh refresh.
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    fn open_issues(&mut self) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required, connect via the config view first.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "No GitHub remote configured on this repo.".into(),
+                ));
+                return;
+            }
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        // The page is on screen at once; its list loads in the background.
+        self.view = View::of_issues(
+            commit_list_state,
+            coords,
+            token,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    /// Tells the CI monitor what to watch: the current branch, when GitHub
+    /// is available.
+    fn configure_ci(&self) {
+        let target = if self.github_features_available() {
+            match (
+                self.ctx.github_auth_state.token.clone(),
+                crate::github::RepoCoords::from_repo(self.repository.path()),
+                self.repository.head(),
+            ) {
+                (Some(token), Some(coords), Head::Branch { name }) => {
+                    Some(crate::ci_monitor::CiTarget {
+                        token,
+                        coords,
+                        branch: name.clone(),
+                    })
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        self.ci.configure(target);
+    }
+
+    /// The dot of the header: its glyph, color and the run a click opens.
+    /// It is shown in every view.
+    fn ci_dot(&self) -> Option<(&'static str, Color, crate::github::actions::Run)> {
+        if self.dir_input.active {
+            return None;
+        }
+        let theme = &self.ctx.color_theme;
+        match self.ci.state(std::time::Instant::now()) {
+            crate::ci_monitor::CiState::None => None,
+            crate::ci_monitor::CiState::Running(run) => Some((
+                crate::ci_monitor::spinner_frame(
+                    self.app_status.spinner_frame,
+                    self.ctx.ui_config.common.nerd_font,
+                ),
+                theme.list_hash_fg,
+                run,
+            )),
+            crate::ci_monitor::CiState::Finished { run, ok, .. } => Some((
+                "●",
+                if ok {
+                    theme.status_success_fg
+                } else {
+                    theme.status_error_fg
+                },
+                run,
+            )),
+        }
+    }
+
+    /// A click on the indicator opens the run, but only from views that lose
+    /// nothing by it: the ones that hold unsaved work (an editor, a rebase, a
+    /// conflict, a dialog) just show it.
+    fn ci_dot_clickable(&self) -> bool {
+        matches!(
+            self.view,
+            View::List(_) | View::Detail(_) | View::Refs(_) | View::Actions(_)
+        )
+    }
+
+    fn open_actions(&mut self, open_run: Option<crate::github::actions::Run>) {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => return,
+        };
+        let Some(coords) = crate::github::RepoCoords::from_repo(self.repository.path()) else {
+            return;
+        };
+        let branch = match self.repository.head() {
+            crate::git::Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            // Already on the page: keep the list it will go back to.
+            View::Actions(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        self.view = View::of_actions(
+            commit_list_state,
+            coords,
+            token,
+            branch,
+            open_run,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    /// The pull requests page, also while a dialog is open over it.
+    fn pull_requests_view(&mut self) -> Option<&mut crate::view::pr::PullRequestsView<'a>> {
+        match &mut self.view {
+            View::PullRequests(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::PullRequests(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The issues page, also while a dialog is open over it.
+    fn issues_view(&mut self) -> Option<&mut crate::view::issue::IssuesView<'a>> {
+        match &mut self.view {
+            View::Issues(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::Issues(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The Actions page, also while a dialog is open over it: the answers to
+    /// its requests must not get lost behind the dialog.
+    fn actions_view(&mut self) -> Option<&mut crate::view::actions::ActionsView<'a>> {
+        match &mut self.view {
+            View::Actions(view) => Some(view),
+            View::Dialog(dialog) => match dialog.before_mut() {
+                View::Actions(view) => Some(view),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn close_actions(&mut self) {
+        // Back on the commit list: look at CI right away.
+        self.ci.poke();
+        if let View::Actions(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    fn close_issues(&mut self) {
+        if let View::Issues(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            if let Some(state) = list_state {
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+            } else {
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 0,
+                            scroll_to_top: true,
+                        },
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    /// Generic background runner for any issue write action. The
+    /// closure executes the API call (already capturing the action's
+    /// parameters); on completion we ship an `IssueActionDone` event
+    /// back to the view so it can refresh + toast.
+    fn spawn_issue_write<F>(&self, issue_number: u64, action: String, f: F)
+    where
+        F: FnOnce(&str, &crate::github::RepoCoords) -> Result<(), String> + Send + 'static,
+    {
+        let token = match &self.ctx.github_auth_state.token {
+            Some(t) if !t.is_empty() => t.clone(),
+            _ => {
+                self.ec.send(AppEvent::NotifyWarn(
+                    "GitHub authentication required.".into(),
+                ));
+                return;
+            }
+        };
+        let coords = match crate::github::RepoCoords::from_repo(self.repository.path()) {
+            Some(c) => c,
+            None => {
+                self.ec
+                    .send(AppEvent::NotifyWarn("No GitHub remote configured.".into()));
+                return;
+            }
+        };
+        let tx = self.ec.sender();
+        std::thread::spawn(move || {
+            let result = f(&token, &coords);
+            tx.send(AppEvent::IssueActionDone {
+                number: issue_number,
+                action,
+                result,
+            });
+        });
+    }
+
+    fn open_interactive_rebase(&mut self, base_hash: String) {
+        let repo_path = self.repository.path().to_path_buf();
+        // Resume mode: caller passes an empty base when we already know a
+        // rebase is in progress (open_dialog short-circuits to this path).
+        // We skip the `base..HEAD` load entirely; the view reads
+        // .git/rebase-merge itself to render its Continue/Skip/Abort UI.
+        let resume_mode =
+            base_hash.is_empty() && crate::git::rebase::rebase_in_progress(&repo_path);
+        let items = if resume_mode {
+            Vec::new()
+        } else {
+            match crate::git::rebase::load_rebase_items(&repo_path, &base_hash) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.ec
+                        .send(AppEvent::NotifyError(format!("Cannot list commits: {}", e)));
+                    return;
+                }
+            }
+        };
+        if !resume_mode && items.is_empty() {
+            self.ec.send(AppEvent::NotifyWarn(
+                "Nothing to rebase, branch is already at the picked commit".into(),
+            ));
+            return;
+        }
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::Dialog(ref mut view) => {
+                // Came in through the Rebase dialog, `take_before_view`
+                // gives us the underlying View, but for now we just lose
+                // its list state. Acceptable.
+                let _ = view;
+                None
+            }
+            _ => None,
+        };
+        self.view = View::of_interactive_rebase(
+            commit_list_state,
+            repo_path,
+            base_hash,
+            items,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_interactive_rebase(&mut self) {
+        if let View::InteractiveRebase(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            if let Some(state) = commit_list_state {
+                let list_context = crate::view::ListRefreshViewContext::from(&state);
+                self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+                // FULL refresh so the new history shows up in the commit
+                // list and any leftover rebase-in-progress state surfaces
+                // via the existing in-progress detection.
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context,
+                        pending_notification: None,
+                    }));
+            } else {
+                // No list state to restore, just trigger a refresh from a
+                // blank list context.
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    fn open_detail_by_hash(&mut self, hash: String) {
+        let commit_hash = CommitHash::from(hash.as_str());
+
+        // The Blame view can hand us any commit reachable from HEAD, including
+        // ones older than the current `max_count` cap or unreachable from the
+        // present refs. Bail out with a notification instead of panicking in
+        // `commit_detail` (which unwraps the in-memory commit map).
+        if self.repository.commit(&commit_hash).is_none() {
+            let short = if hash.len() >= 7 {
+                &hash[..7]
+            } else {
+                hash.as_str()
+            };
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Commit {} is not in the loaded history, press `]` to load more.",
+                short
+            )));
+            return;
+        }
+
+        // Carry the file path forward when the user dives into a commit from a
+        // file-centric view, the new Detail view will pre-select that file in
+        // its change list so the user lands exactly where they were looking.
+        let preselect_file: Option<String> = match self.view {
+            View::Blame(ref view) => Some(view.file_path().to_string()),
+            View::FileHistory(ref view) => Some(view.file_path().to_string()),
+            _ => None,
+        };
+
+        let commit_list_state = match self.view {
+            View::FileHistory(ref mut view) => view.take_list_state(),
+            View::Blame(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let (commit, changes) = self.repository.commit_detail(&commit_hash);
+        let refs: Vec<Ref> = self
+            .repository
+            .refs(&commit_hash)
+            .into_iter()
+            .cloned()
+            .collect();
+        let head_branch_name = match self.repository.head() {
+            Head::Branch { name } => Some(name.clone()),
+            _ => None,
+        };
+        let head_commit_hash = head_commit_hash_from_repository(self.repository);
+        if let Some(list_state) = commit_list_state {
+            self.view = View::of_detail(
+                list_state,
+                commit,
+                changes,
+                refs,
+                head_branch_name,
+                head_commit_hash,
+                self.ctx.clone(),
+                self.ec.sender(),
+            );
+            // Coming from Blame / FileHistory: jump straight to the file the
+            // user was looking at. `select_file_by_path` falls back to the
+            // default selection (file 0) when the path isn't in the commit's
+            // change list, so renames-with-no-match degrade gracefully.
+            if let Some(path) = preselect_file {
+                if let View::Detail(ref mut detail) = self.view {
+                    detail.select_file_by_path(&path);
+                }
+            }
+        } else {
+            self.ec.send(AppEvent::NotifyError(
+                "Cannot open commit detail: no list state available.".into(),
+            ));
+        }
+    }
+
+    fn open_uncommitted_diff(&mut self, file_path: String, is_staged: bool) {
+        if crate::git::diff::is_binary_extension(&file_path) {
+            self.ec.send(AppEvent::NotifyWarn(format!(
+                "Binary file: diff not available for {}",
+                file_path
+            )));
+            return;
+        }
+        self.file_stream.clear();
+
+        let (commit_list_state, all_files, is_untracked) = match self.view {
+            View::Uncommitted(ref mut view) => {
+                let list_state = view.take_list_state();
+                let is_untracked = view.untracked.iter().any(|f| f.path == file_path);
+                let all_files: Vec<(String, bool)> = view
+                    .staged
+                    .iter()
+                    .filter(|f| f.status != StatusType::Deleted)
+                    .map(|f| (f.path.clone(), true))
+                    .chain(
+                        view.unstaged
+                            .iter()
+                            .filter(|f| f.status != StatusType::Deleted)
+                            .map(|f| (f.path.clone(), false)),
+                    )
+                    .chain(view.untracked.iter().map(|f| (f.path.clone(), false)))
+                    .collect();
+                (list_state, all_files, is_untracked)
+            }
+            View::Diff(ref mut view) => {
+                let list_state = view.take_list_state();
+                let all_files = view.all_file_paths().clone();
+                (list_state, all_files, false)
+            }
+            _ => return,
+        };
+
+        // For untracked files, show content as additions (not a real diff)
+        if is_untracked {
+            match DiffEntry::load_untracked_file(self.repository.path(), &file_path) {
+                Err(e) if e == "binary" => {
+                    // Show a placeholder entry with the "cannot open" message
+                    let entry = DiffEntry::binary_placeholder(&file_path);
+                    let title = format!("File: {}", file_path);
+                    self.view = View::of_uncommitted_diff(
+                        commit_list_state,
+                        vec![entry],
+                        self.ctx.clone(),
+                        self.ec.sender(),
+                        title,
+                        all_files,
+                        self.repository.path().to_path_buf(),
+                    );
+                }
+                Err(e) => {
+                    self.ec.send(AppEvent::NotifyError(e));
+                }
+                Ok(full_entry) => {
+                    // Stream the first 200 lines immediately, then the rest via Tick
+                    let total_lines: Vec<_> =
+                        full_entry.hunks.into_iter().flat_map(|h| h.lines).collect();
+                    let chunk_size = 200.min(total_lines.len());
+                    let (initial, rest): (Vec<_>, Vec<_>) = total_lines
+                        .into_iter()
+                        .enumerate()
+                        .partition(|(i, _)| *i < chunk_size);
+                    let initial: Vec<_> = initial.into_iter().map(|(_, l)| l).collect();
+                    let rest: Vec<_> = rest.into_iter().map(|(_, l)| l).collect();
+
+                    let initial_hunk = crate::git::diff::Hunk {
+                        old_start: 0,
+                        old_count: 0,
+                        new_start: 1,
+                        new_count: initial.len() as u32,
+                        lines: initial,
+                        origin: crate::git::diff::HunkOrigin::Untracked,
+                    };
+                    let initial_entry = DiffEntry {
+                        old_path: Some("/dev/null".to_string()),
+                        new_path: Some(file_path.clone()),
+                        hunks: vec![initial_hunk],
+                    };
+                    let title = format!("File: {}", file_path);
+                    self.view = View::of_uncommitted_diff(
+                        commit_list_state,
+                        vec![initial_entry],
+                        self.ctx.clone(),
+                        self.ec.sender(),
+                        title,
+                        all_files,
+                        self.repository.path().to_path_buf(),
+                    );
+                    self.file_stream = rest;
+                }
+            }
+            return;
+        }
+
+        // Hunk-level staging, we always load the combined staged+unstaged
+        // diff so the view shows every hunk linearly with its own indicator.
+        // `is_staged` only drives the initial scroll position so the user
+        // lands on the first hunk of the side they clicked from.
+        match DiffEntry::load_combined_uncommitted_for_file(self.repository.path(), &file_path, 3) {
+            Ok(Some(diff_entry)) => {
+                let title = format!("Diff: {}", file_path);
+                self.view = View::of_uncommitted_diff(
+                    commit_list_state,
+                    vec![diff_entry],
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                    title,
+                    all_files,
+                    self.repository.path().to_path_buf(),
+                );
+                if let View::Diff(ref mut view) = self.view {
+                    let origin = if is_staged {
+                        crate::git::diff::HunkOrigin::Staged
+                    } else {
+                        crate::git::diff::HunkOrigin::Unstaged
+                    };
+                    view.set_initial_scroll_origin(origin);
+                }
+            }
+            Ok(None) => {
+                self.ec.send(AppEvent::NotifyWarn(format!(
+                    "No changes for {}",
+                    file_path
+                )));
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        }
+    }
+
+    /// Stage or unstage a single hunk by reloading the combined diff, picking
+    /// the hunk at `hunk_idx`, piping the patch through `git apply --cached`
+    /// (with `--reverse` for unstage), then re-opening the diff so the view
+    /// reflects the new state. Preserves the user's scroll position and
+    /// re-focuses the same hunk so toggling doesn't snap them back to row 0.
+    /// If the user has edited the file between the view render and the click,
+    /// hunk_idx may no longer line up, in which case `git apply` itself
+    /// surfaces an error verbatim.
+    fn toggle_hunk_stage(&mut self, file_path: String, hunk_idx: usize, currently_staged: bool) {
+        let repo_path = self.repository.path().to_path_buf();
+        let combined =
+            match DiffEntry::load_combined_uncommitted_for_file(&repo_path, &file_path, 3) {
+                Ok(Some(d)) => d,
+                Ok(None) => {
+                    self.ec
+                        .send(AppEvent::NotifyWarn("No changes to toggle".to_string()));
+                    return;
+                }
+                Err(e) => {
+                    self.ec.send(AppEvent::NotifyError(e));
+                    return;
+                }
+            };
+        let hunk = match combined.hunks.get(hunk_idx) {
+            Some(h) => h,
+            None => {
+                self.ec.send(AppEvent::NotifyError(format!(
+                    "Hunk {} not found",
+                    hunk_idx
+                )));
+                return;
+            }
+        };
+        let result = if currently_staged {
+            crate::git::actions::unstage_hunk(&repo_path, &file_path, hunk)
+        } else {
+            crate::git::actions::stage_hunk(&repo_path, &file_path, hunk)
+        };
+        match result {
+            Ok(_) => {
+                // Capture the user's current scroll position from the diff view
+                // before we tear it down, so we can restore it on the new view.
+                let prev_scroll = match self.view {
+                    View::Diff(ref v) => v.scroll_offset(),
+                    _ => 0,
+                };
+                // Reload the combined diff so the moved hunk shows its new state.
+                self.open_uncommitted_diff(file_path, false);
+                // After reload, ask the new view to anchor on the toggled hunk.
+                if let View::Diff(ref mut v) = self.view {
+                    v.set_restore_focus(hunk_idx, prev_scroll);
+                }
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("git apply failed: {}", e)));
+            }
+        }
+    }
+
+    fn close_diff_to_uncommitted(&mut self) {
+        if let View::Diff(ref mut view) = self.view {
+            let list_state = view.take_list_state();
+            let repo_path = self.repository.path().to_path_buf();
+            match crate::git::status::UncommittedChanges::load(&repo_path) {
+                Ok(changes) => {
+                    let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                        let diff_result = if is_staged {
+                            DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+                        } else {
+                            DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+                        };
+
+                        match diff_result {
+                            Ok(diff_entry) => {
+                                let (additions, deletions) =
+                                    diff_entry.count_additions_and_deletions();
+                                (additions, deletions)
+                            }
+                            Err(_) => (0, 0),
+                        }
+                    };
+
+                    let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                        let (additions, deletions) = load_diff_stats(f, is_staged);
+                        crate::widget::uncommitted::UncommittedFile {
+                            status: f.status.clone(),
+                            path: f.path.clone(),
+                            old_path: f.old_path.clone(),
+                            additions,
+                            deletions,
+                        }
+                    };
+
+                    self.view = View::Uncommitted(Box::new(
+                        crate::view::uncommitted::UncommittedView::new(
+                            changes.unstaged.iter().map(|f| convert(f, false)).collect(),
+                            changes.staged.iter().map(|f| convert(f, true)).collect(),
+                            changes
+                                .untracked
+                                .iter()
+                                .map(|f| convert(f, false))
+                                .collect(),
+                            list_state,
+                            self.ctx.clone(),
+                            self.ec.sender(),
+                        ),
+                    ));
+                }
+                Err(err) => {
+                    self.ec.send(AppEvent::NotifyError(err));
+                }
+            }
+        }
+    }
+
+    fn open_user_command(
+        &mut self,
+        user_command_number: usize,
+        terminal: Option<&mut DefaultTerminal>,
+    ) {
+        let clear = match extract_user_command_by_number(user_command_number, &self.ctx)
+            .map(|c| &c.r#type)
+        {
+            Ok(UserCommandType::Inline) => {
+                self.open_user_command_inline(user_command_number);
+                false
+            }
+            Ok(UserCommandType::Silent) => {
+                self.open_user_command_silent(user_command_number);
+                true
+            }
+            Ok(UserCommandType::Suspend) => {
+                self.open_user_command_suspend(user_command_number);
+                true
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+                false
+            }
+        };
+        if clear {
+            if let Some(t) = terminal {
+                if let Err(err) = t.clear() {
+                    let msg = format!("Failed to clear terminal: {err:?}");
+                    self.ec.send(AppEvent::NotifyError(msg));
+                }
+            }
+        }
+    }
+
+    fn open_user_command_inline(&mut self, user_command_number: usize) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.as_list_state(),
+            View::Detail(ref mut view) => view.as_list_state(),
+            View::UserCommand(ref mut view) => view.as_list_state(),
+            _ => return,
+        };
+        let (commit, _, refs) = selected_commit_details(self.repository, commit_list_state);
+        let result = build_external_command_parameters_and_exec_command(
+            &commit,
+            &refs,
+            user_command_number,
+            self.app_status.view_area,
+            &self.ctx,
+        );
+        match result {
+            Ok(output) => {
+                // take list state only when the command execution is successful, to avoid losing the state when the command fails
+                let commit_list_state = match self.view {
+                    View::List(ref mut view) => view.take_list_state(),
+                    View::Detail(ref mut view) => view.take_list_state(),
+                    View::UserCommand(ref mut view) => view.take_list_state(),
+                    _ => return,
+                };
+                self.view = View::of_user_command(
+                    commit_list_state,
+                    output,
+                    user_command_number,
+                    self.ctx.clone(),
+                    self.ec.sender(),
+                );
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        };
+    }
+
+    fn open_user_command_silent(&mut self, user_command_number: usize) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.as_list_state(),
+            View::Detail(ref mut view) => view.as_list_state(),
+            View::UserCommand(ref mut view) => view.as_list_state(),
+            _ => return,
+        };
+        let (commit, _, refs) = selected_commit_details(self.repository, commit_list_state);
+        let result = build_external_command_parameters_and_exec_command(
+            &commit,
+            &refs,
+            user_command_number,
+            self.app_status.view_area,
+            &self.ctx,
+        );
+        match result {
+            Ok(_) => {
+                if extract_user_command_refresh_by_number(user_command_number, &self.ctx) {
+                    self.view.refresh();
+                }
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        }
+    }
+
+    fn open_user_command_suspend(&mut self, user_command_number: usize) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => view.as_list_state(),
+            View::Detail(ref mut view) => view.as_list_state(),
+            View::UserCommand(ref mut view) => view.as_list_state(),
+            _ => return,
+        };
+        let (commit, _, refs) = selected_commit_details(self.repository, commit_list_state);
+        match build_external_command_parameters(
+            &commit,
+            &refs,
+            user_command_number,
+            self.app_status.view_area,
+            &self.ctx,
+        ) {
+            Ok(params) => {
+                self.ec.suspend();
+                let exec_result = exec_user_command_suspend(params);
+                self.ec.resume();
+
+                if extract_user_command_refresh_by_number(user_command_number, &self.ctx) {
+                    self.view.refresh();
+                }
+
+                // notify after resuming and refreshing
+                if let Err(err) = exec_result {
+                    self.ec.send(AppEvent::NotifyError(err));
+                }
+            }
+            Err(err) => {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        }
+    }
+
+    fn close_user_command(&mut self) {
+        if let View::UserCommand(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn open_refs(&mut self) {
+        if let View::List(ref mut view) = self.view {
+            let commit_list_state = view.take_list_state();
+            let refs = self.repository.all_refs().into_iter().cloned().collect();
+            self.view = View::of_refs(commit_list_state, refs, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn close_refs(&mut self) {
+        if let View::Refs(ref mut view) = self.view {
+            let mut commit_list_state = view.take_list_state();
+            // Hover on refs intentionally suppressed avatar
+            // refresh to keep navigation snappy on huge repos;
+            // now that the user has settled on a row and is
+            // returning to the list, force a prep on the next
+            // render so the visible window's avatars catch up.
+            commit_list_state.invalidate_visible_avatars();
+            self.view = View::of_list(commit_list_state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn open_help(&mut self) {
+        let before_view = std::mem::take(&mut self.view);
+        self.view = View::of_help(before_view, self.ctx.clone(), self.ec.sender());
+    }
+
+    fn close_help(&mut self) {
+        if let View::Help(ref mut view) = self.view {
+            self.view = view.take_before_view();
+        }
+    }
+
+    fn open_config(&mut self) {
+        let before = std::mem::take(&mut self.view);
+        self.view = View::of_config(before, self.ctx.clone(), self.ec.sender());
+    }
+
+    /// Suspend the TUI, open `~/.config/git_tui/config.toml` in `$EDITOR`
+    /// (with a sensible fallback chain), then resume. The file is
+    /// created on first use so the editor always lands on a valid path.
+    /// The reload-on-Refresh path picks up any edits when the user
+    /// quits the editor, no app restart needed.
+    fn open_config_file_in_editor(&mut self) {
+        let Some(path) = crate::config::resolve_config_file_path() else {
+            self.ec.send(AppEvent::NotifyError(
+                "Could not resolve config path".into(),
+            ));
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("create config dir: {e}")));
+                return;
+            }
+        }
+        if !path.exists() {
+            // Seed with a header so the editor opens on something
+            // meaningful instead of a blank file.
+            let seed = "# git-tui config, see https://gitoui.nayji7.dev/configurations/\n";
+            if let Err(e) = std::fs::write(&path, seed) {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("create config file: {e}")));
+                return;
+            }
+        }
+        // Resolve the editor. `$VISUAL` wins over `$EDITOR` per the
+        // long-standing UNIX convention; fall back to common defaults.
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| "vi".to_string());
+        // Split the editor string into command + args (e.g. "code -w").
+        let mut parts = editor.split_whitespace();
+        let Some(bin) = parts.next() else {
+            self.ec
+                .send(AppEvent::NotifyError("$EDITOR is empty".into()));
+            return;
+        };
+        let args: Vec<&str> = parts.collect();
+
+        self.ec.suspend();
+        let exec_result = std::process::Command::new(bin)
+            .args(&args)
+            .arg(&path)
+            .status();
+        self.ec.resume();
+
+        match exec_result {
+            Ok(s) if s.success() => {
+                // Bubble a Refresh up via the pending_refresh slot
+                // same pattern as the directory-switch flow. The main
+                // run() loop drains it and re-enters lib::run, which
+                // reloads the config from disk so edits take effect
+                // without a quit/restart.
+                self.pending_refresh = Some(RefreshRequest {
+                    context: crate::view::RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some("Config reloaded".into()),
+                    },
+                });
+            }
+            Ok(s) => {
+                self.ec
+                    .send(AppEvent::NotifyWarn(format!("editor exited: {s}")));
+            }
+            Err(e) => {
+                self.ec
+                    .send(AppEvent::NotifyError(format!("launch {bin}: {e}")));
+            }
+        }
+    }
+
+    fn close_config(&mut self) {
+        if let View::Config(ref mut view) = self.view {
+            let core = view.core_config().clone();
+            let ui = view.ui_config().clone();
+            let github_auth_state = view.github_auth_state().clone();
+            // Field-level diff. Each branch below applies the changed
+            // setting in-place, no full app refresh, that path used to
+            // delete every Kitty image placement before re-rendering,
+            // producing a visible double blink when transitioning back
+            // to the commit list.
+            //
+            // This is where the settings marked `OnClose` in `ROW_APPLIES`
+            // (view/config.rs) take effect. The `Live` ones were applied while
+            // the page was open (`apply_live_config_settings`), the
+            // `NextLaunch` one is only saved. A new setting needs a decision
+            // in that table first, then the matching code here or there.
+            let old_core = self.ctx.core_config.clone();
+            let graph_style_changed = old_core.option.graph_style != core.option.graph_style;
+            let graph_width_changed = old_core.option.graph_width != core.option.graph_width;
+            let github_avatars_changed = old_core.github_avatars() != core.github_avatars();
+            // Already applied live (the capture switched), unless the config
+            // was edited some other way.
+            let mouse_changed = self.ctx.ui_config.common.mouse_enabled != ui.common.mouse_enabled;
+            let auth_changed = github_auth_state != self.ctx.github_auth_state;
+            // Toggling graph_enabled flips the entire layout (the Graph
+            // column appears/disappears and the message column expands).
+            // When it goes true → false we also evict any still-painted
+            // Kitty image placement, otherwise the prior frame's lanes
+            // stay on screen until the user scrolls past them.
+            let graph_enabled_changed =
+                self.ctx.ui_config.list.graph_enabled != ui.list.graph_enabled;
+            // Two settings can't be applied without rebuilding the
+            // entire app:
+            //  - `order` (chrono / topo) gates `git log` itself in
+            //    `Repository::load`; the in-memory commit list was built
+            //    with the OLD order.
+            //  - `protocol` selects the image-protocol encoder held on
+            //    `AppContext.image_protocol` AND baked into every
+            //    `GraphImageManager` placement.
+            // For those, we fall through to a full Ret::Refresh after
+            // persisting + saving, visible flicker, but the change
+            // actually takes effect.
+            let order_changed = old_core.option.order != core.option.order;
+            let protocol_changed = old_core.option.graph_renderer != core.option.graph_renderer;
+            // Toggling `graph_enabled` swaps the calc_graph backend
+            // (real topology walk ↔ cheap calc_colors_only stub).
+            // Without a full refresh, the layout stored in the
+            // existing `Graph` value stays put and the renderer
+            // shows either the broken stub when going OFF→ON (red
+            // dots on lane 0, no edges) or stale lanes when going
+            // ON→OFF. A refresh re-runs the right calc and
+            // rebuilds the GraphImageManager so the column is
+            // either pristine real-graph or properly tinted
+            // colour-only.
+            let needs_refresh = order_changed || protocol_changed || graph_enabled_changed;
+
+            self.view = view.take_before_view();
+            let github_avatars = core.github_avatars();
+            let ctx = Rc::make_mut(&mut self.ctx);
+            ctx.core_config = core;
+            // Always rebuild the graph palette from the (possibly theme-
+            // overridden) color_theme + user's [graph] config so the
+            // returning list view paints with the right bg + branch colours.
+            ctx.graph_color_set =
+                crate::color::build_graph_color_set(&ctx.color_theme, &ctx.graph_config.color);
+            ctx.ui_config = ui.clone();
+            ctx.github_auth_state = github_auth_state.clone();
+            if auth_changed || github_avatars_changed {
+                ctx.avatar_manager
+                    .lock()
+                    .unwrap()
+                    .set_github_token(github_auth_state.token.clone());
+                ctx.avatar_manager
+                    .lock()
+                    .unwrap()
+                    .set_github_avatars(github_avatars);
+            }
+
+            // Mouse capture toggles on the terminal directly.
+            if mouse_changed {
+                let _ = if ui.common.mouse_enabled {
+                    ratatui::crossterm::execute!(
+                        std::io::stdout(),
+                        ratatui::crossterm::event::EnableMouseCapture
+                    )
+                } else {
+                    ratatui::crossterm::execute!(
+                        std::io::stdout(),
+                        ratatui::crossterm::event::DisableMouseCapture
+                    )
+                };
+            }
+
+            // Sync the inner view's ctx with the freshly-mutated one.
+            // `Rc::make_mut` above COWed the inner data (the inner view
+            // held a second Rc clone), so without this swap the view
+            // keeps reading the PRE-change ctx, date_format,
+            // github_avatars, diff_mode, conflict_view, rebase_view
+            // changes would silently no-op until the next full Refresh.
+            // The widget (CommitList et al.) is rebuilt per frame from
+            // the view's `ctx.clone()` so the next render picks up
+            // everything the new ctx exposes.
+            if let View::List(ref mut list_view) = self.view {
+                list_view.replace_ctx(self.ctx.clone());
+            }
+
+            // Live-apply the graph-image rebake settings on the list
+            // view (only relevant when the inner view is the List).
+            if let View::List(ref mut list_view) = self.view {
+                let palette = self.ctx.graph_color_set.clone();
+                if graph_style_changed {
+                    let new_style: GraphStyle = self.ctx.core_config.option.graph_style.into();
+                    list_view.update_graph_style(new_style, &palette);
+                    let smooth = new_style == GraphStyle::Smooth;
+                    let graph = list_view.as_list_state().graph();
+                    let mut new_bcm = FxHashMap::default();
+                    for r in self.repository.all_refs() {
+                        match r {
+                            Ref::Branch { name, target } => {
+                                if let Some(&(px, _)) = graph.commit_pos_map.get(target) {
+                                    let ci = if smooth {
+                                        graph.commit_color_map.get(target).copied().unwrap_or(px)
+                                    } else {
+                                        px
+                                    };
+                                    new_bcm
+                                        .insert(name.clone(), palette.get(ci).to_ratatui_color());
+                                }
+                            }
+                            Ref::RemoteBranch { name, target } => {
+                                if let Some(&(px, _)) = graph.commit_pos_map.get(target) {
+                                    let ci = if smooth {
+                                        graph.commit_color_map.get(target).copied().unwrap_or(px)
+                                    } else {
+                                        px
+                                    };
+                                    let c = palette.get(ci).to_ratatui_color();
+                                    new_bcm.insert(name.clone(), c);
+                                    if let Some((_, base)) = name.split_once('/') {
+                                        new_bcm.insert(base.to_string(), c);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    list_view.as_mut_list_state().set_branch_color_map(new_bcm);
+                }
+                if graph_width_changed {
+                    if let Some(new_cwt) =
+                        list_view.resolve_cell_width(self.ctx.core_config.option.graph_width)
+                    {
+                        list_view.update_cell_width_type(new_cwt, &palette);
+                    }
+                }
+            }
+
+            // Theme/graph-style/graph-width changes require purging
+            // Kitty's stored graph images so the next `a=T` re-upload
+            // installs the freshly-baked pixels. Without this delete,
+            // some Kitty setups keep displaying the previous bake.
+            // Toggling graph_enabled also needs the cleanup so disabling
+            // the graph evicts the still-painted placements (and so
+            // re-enabling forces a fresh upload at the new column width).
+            if graph_style_changed || graph_width_changed || graph_enabled_changed
+            {
+                let _ = self.cleanup_graph_images();
+            }
+            // The per-row graph cache (`graph_render_state` on
+            // `CommitListState`) lives on the list view, NOT on ctx -
+            // make sure a graph_enabled toggle invalidates it too,
+            // otherwise the next frame's cache-hit path skips re-paint
+            // and the disable / re-enable transition shows blank lanes.
+            if graph_enabled_changed {
+                if let View::List(ref mut list_view) = self.view {
+                    list_view.clear_graph_images();
+                }
+            }
+
+            // `order` / `protocol` need a full restart, the smooth
+            // path can't reach them. Trigger a Refresh from the list
+            // view's current state so the user lands back on the same
+            // commit after the rebuild.
+            if needs_refresh {
+                let list_context = if let View::List(ref mut list_view) = self.view {
+                    Some(crate::view::ListRefreshViewContext::from(
+                        list_view.as_list_state(),
+                    ))
+                } else {
+                    None
+                };
+                self.ec
+                    .send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                        list_context: list_context.unwrap_or(crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        }),
+                        pending_notification: None,
+                    }));
+            }
+        }
+    }
+
+    fn finish_github_auth(&mut self, state: GithubAuthState) {
+        let authenticated = state.is_authenticated();
+        if let View::Config(ref mut view) = self.view {
+            view.finish_github_auth(state.clone());
+        }
+        let ctx = Rc::make_mut(&mut self.ctx);
+        ctx.github_auth_state = state.clone();
+        ctx.avatar_manager
+            .lock()
+            .unwrap()
+            .set_github_token(state.token.clone());
+        if authenticated {
+            let tx = self.ec.sender();
+            thread::spawn(move || {
+                thread::sleep(std::time::Duration::from_secs(3));
+                tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                    list_context: crate::view::ListRefreshViewContext {
+                        commit_hash: String::new(),
+                        selected: 0,
+                        height: 20,
+                        scroll_to_top: false,
+                    },
+                    pending_notification: None,
+                }));
+            });
+        }
+    }
+
+    fn start_background_fetch(&mut self) {
+        let repo_path = self.repository.path().to_path_buf();
+        let tx = self.ec.sender();
+        thread::spawn(move || {
+            let _ = actions::fetch(&repo_path);
+            tx.send(AppEvent::Refresh(crate::view::RefreshViewContext::List {
+                list_context: crate::view::ListRefreshViewContext {
+                    commit_hash: String::new(),
+                    selected: 0,
+                    height: 20,
+                    scroll_to_top: false,
+                },
+                pending_notification: None,
+            }));
+        });
+    }
+
+    fn select_older_commit(&mut self) {
+        if let View::Detail(ref mut view) = self.view {
+            view.select_older_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view
+                .as_list_state()
+                .unwrap()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
+            if let Err(err) = view.select_older_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        } else if let View::UserCommand(ref mut view) = self.view {
+            view.select_older_commit(
+                self.repository,
+                self.app_status.view_area,
+                build_external_command_parameters_and_exec_command,
+            );
+        }
+    }
+
+    fn select_newer_commit(&mut self) {
+        if let View::Detail(ref mut view) = self.view {
+            view.select_newer_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view
+                .as_list_state()
+                .unwrap()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
+            if let Err(err) = view.select_newer_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        } else if let View::UserCommand(ref mut view) = self.view {
+            view.select_newer_commit(
+                self.repository,
+                self.app_status.view_area,
+                build_external_command_parameters_and_exec_command,
+            );
+        }
+    }
+
+    fn select_parent_commit(&mut self) {
+        if let View::Detail(ref mut view) = self.view {
+            view.select_parent_commit(self.repository);
+        } else if let View::Diff(ref mut view) = self.view {
+            let hash = view
+                .as_list_state()
+                .unwrap()
+                .selected_commit_hash()
+                .as_str()
+                .to_string();
+            if let Err(err) = view.select_parent_commit(self.repository.path(), &hash) {
+                self.ec.send(AppEvent::NotifyError(err));
+            }
+        } else if let View::UserCommand(ref mut view) = self.view {
+            view.select_parent_commit(
+                self.repository,
+                self.app_status.view_area,
+                build_external_command_parameters_and_exec_command,
+            );
+        }
+    }
+
+    fn init_with_context(&mut self, context: RefreshViewContext) {
+        if let View::List(ref mut view) = self.view {
+            view.reset_commit_list_with(context.list_context());
+        }
+        match context {
+            RefreshViewContext::List {
+                pending_notification,
+                ..
+            } => {
+                if let Some(msg) = pending_notification {
+                    self.ec.send(AppEvent::NotifySuccess(msg));
+                }
+            }
+            RefreshViewContext::Detail { .. } => {
+                self.open_detail();
+            }
+            RefreshViewContext::Diff { .. } => {
+                // Diff global removed; only per-file diffs are supported now
+            }
+            RefreshViewContext::UserCommand {
+                user_command_context,
+                ..
+            } => {
+                self.open_user_command(user_command_context.n, None);
+            }
+            RefreshViewContext::Refs { refs_context, .. } => {
+                self.open_refs();
+                if let View::Refs(ref mut view) = self.view {
+                    view.reset_refs_with(refs_context);
+                }
+            }
+        }
+    }
+
+    fn clear_status_line(&mut self) {
+        self.app_status.status_line = StatusLine::None;
+        self.app_status.notification_timestamp = None;
+    }
+
+    fn handle_mouse_event(
+        &mut self,
+        mouse: ratatui::crossterm::event::MouseEvent,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<bool, std::io::Error> {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+
+        if matches!(self.view, View::Terminal(_)) {
+            return Ok(self.handle_terminal_mouse(mouse));
+        }
+
+        let needs_draw = match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if self.dir_input.active {
+                    self.dir_input.scroll_by(-3);
+                } else {
+                    self.handle_view_event_clearing_detail_avatar(
+                        crate::event::UserEventWithCount::new(crate::event::UserEvent::ScrollUp, 3),
+                        ratatui::crossterm::event::KeyEvent::new(
+                            ratatui::crossterm::event::KeyCode::Up,
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        ),
+                        terminal,
+                    )?;
+                }
+                true
+            }
+            MouseEventKind::ScrollDown => {
+                if self.dir_input.active {
+                    self.dir_input.scroll_by(3);
+                } else {
+                    self.handle_view_event_clearing_detail_avatar(
+                        crate::event::UserEventWithCount::new(
+                            crate::event::UserEvent::ScrollDown,
+                            3,
+                        ),
+                        ratatui::crossterm::event::KeyEvent::new(
+                            ratatui::crossterm::event::KeyCode::Down,
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        ),
+                        terminal,
+                    )?;
+                }
+                true
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                use ratatui::crossterm::event::KeyModifiers;
+                // The CI dot of the header opens the Actions page on its run.
+                if let (Some(rect), Some(run)) = (self.ci_dot_rect, self.ci_dot_run.clone()) {
+                    if mouse.column >= rect.x
+                        && mouse.column < rect.x + rect.width
+                        && mouse.row == rect.y
+                    {
+                        self.ec.send(AppEvent::OpenActions { run: Some(run) });
+                        return Ok(true);
+                    }
+                }
+                // When the dir-input overlay is open it owns every mouse
+                // event, a click inside the dropdown completes the entry
+                // into the input (same as Tab) so the user can keep refining
+                // before pressing Enter. Clicks outside are swallowed so the
+                // underlying commit list can't be interacted with.
+                if self.dir_input.active {
+                    if let Some(idx) = self.dir_dropdown_hit(mouse.column, mouse.row) {
+                        if let Some(s) = self.dir_input.suggestions.get(idx).cloned() {
+                            // Two-step click: first click on a suggestion just
+                            // fills the input (Tab semantics). Clicking the
+                            // exact same suggestion a second time, i.e. the
+                            // input text already equals what we'd write
+                            // commits the cd (Enter semantics). Lets the user
+                            // both refine and confirm with the mouse alone.
+                            if self.dir_input.text == s.display {
+                                self.dir_input.selected = Some(idx);
+                                let cwd = std::env::current_dir().unwrap_or_default();
+                                if let Some(target) = self.dir_input.resolve(&cwd) {
+                                    // Same gates as the keyboard Enter path:
+                                    // first reject missing paths with a clear
+                                    // "directory does not exist" message, then
+                                    // fall through to the git-root check.
+                                    if !target.exists() {
+                                        self.dir_error_message = Some((
+                                            "directory does not exist".to_string(),
+                                            std::time::Instant::now(),
+                                        ));
+                                        return Ok(true);
+                                    }
+                                    let repo_root = match crate::git::find_repo_root(&target) {
+                                        Some(r) => r,
+                                        None => {
+                                            self.dir_error_message = Some((
+                                                "not a git directory".to_string(),
+                                                std::time::Instant::now(),
+                                            ));
+                                            return Ok(true);
+                                        }
+                                    };
+                                    match std::env::set_current_dir(&repo_root) {
+                                        Ok(_) => {
+                                            self.dir_recents =
+                                                crate::recents::push(&repo_root, &self.dir_recents);
+                                            self.dir_input.close();
+                                            self.dir_dropdown_area = None;
+                                            let _ = ratatui::crossterm::execute!(
+                                                std::io::stdout(),
+                                                ratatui::crossterm::cursor::Show
+                                            );
+                                            // Bubble the rebuild up via the
+                                            // pending_refresh slot, the main
+                                            // loop will drain it right after
+                                            // handle_mouse_event returns and
+                                            // exit with Ret::Refresh, the same
+                                            // path the keyboard Enter takes.
+                                            self.pending_refresh = Some(RefreshRequest {
+                                                context: crate::view::RefreshViewContext::List {
+                                                    list_context:
+                                                        crate::view::ListRefreshViewContext {
+                                                            commit_hash: String::new(),
+                                                            selected: 0,
+                                                            height: 20,
+                                                            scroll_to_top: true,
+                                                        },
+                                                    pending_notification: Some(format!(
+                                                        "Switched to {}",
+                                                        target.display()
+                                                    )),
+                                                },
+                                            });
+                                            return Ok(true);
+                                        }
+                                        Err(e) => {
+                                            self.ec.send(AppEvent::NotifyError(format!(
+                                                "cd failed: {}",
+                                                e
+                                            )));
+                                            self.dir_input.close();
+                                            self.dir_dropdown_area = None;
+                                            let _ = ratatui::crossterm::execute!(
+                                                std::io::stdout(),
+                                                ratatui::crossterm::cursor::Show
+                                            );
+                                            self.view.clear_graph_images();
+                                            let _ = self.clear_terminal(terminal);
+                                        }
+                                    }
+                                }
+                            } else {
+                                self.dir_input.text = s.display;
+                                self.dir_input.cursor = self.dir_input.text.len();
+                                self.dir_input.selected = None;
+                                let recents = self.dir_recents.clone();
+                                self.dir_input.refresh_suggestions_from(&recents);
+                            }
+                        }
+                    }
+                    // Click outside dropdown while overlay is active: do
+                    // nothing, explicitly NOT propagating to view.handle_click.
+                    return Ok(true);
+                }
+                if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.view.handle_shift_click(mouse.column, mouse.row);
+                } else {
+                    self.view.handle_click(mouse.column, mouse.row);
+                }
+                // Click in the Config view can cycle a live setting (the
+                // theme, the select mode), mirror the live-apply that the
+                // keyboard path runs.
+                self.apply_live_config_settings();
+                true
+            }
+            MouseEventKind::Moved => {
+                if self.dir_input.active {
+                    // Overlay owns hover: highlight the dropdown row under
+                    // the cursor, swallow events that fall outside so the
+                    // commit list doesn't react.
+                    if let Some(idx) = self.dir_dropdown_hit(mouse.column, mouse.row) {
+                        self.dir_input.selected = Some(idx);
+                    }
+                    return Ok(true);
+                }
+                let over_dot = self.ci_dot_rect.is_some_and(|r| {
+                    mouse.column >= r.x && mouse.column < r.x + r.width && mouse.row == r.y
+                });
+                let dot_changed = over_dot != self.ci_dot_hovered;
+                self.ci_dot_hovered = over_dot;
+                let view_changed = self.view.handle_mouse_move(mouse.column, mouse.row);
+                dot_changed || view_changed
+            }
+            _ => false,
+        };
+        Ok(needs_draw)
+    }
+
+    fn update_status_input(
+        &mut self,
+        msg: String,
+        cursor_pos: Option<u16>,
+        transient_msg: Option<String>,
+    ) {
+        self.app_status.status_line = StatusLine::Input(msg, cursor_pos, transient_msg);
+    }
+
+    /// Set the footer text to a spinner-style `Spinner(msg)` line.
+    /// Does NOT animate the header logo - that animation is now
+    /// reserved for the background full-load thread (see
+    /// `AppContext::bg_full_load_in_progress`). Keeping this entry
+    /// point so existing call sites that wanted a busy footer text
+    /// during git pull / fetch / fast-forward / cd still work; the
+    /// footer renderer still shows a braille tick on the
+    /// `StatusLine::Spinner` variant.
+    fn start_spinner(&mut self, msg: &str) {
+        self.app_status.status_line = StatusLine::Spinner(msg.to_string());
+    }
+
+    /// Clear a spinner-style footer line. The header logo is
+    /// untouched (it has been decoupled from this code path - see
+    /// `start_spinner`). The footer renderer keeps showing
+    /// `Spinner(msg)` until *something* overwrites it, and not
+    /// every caller dispatches a Notify* afterwards (e.g. opening
+    /// a dialog leaves no replacement). Without this, "Fetching
+    /// commit..." lingers in the footer after the action completes.
+    fn stop_spinner(&mut self) {
+        if matches!(self.app_status.status_line, StatusLine::Spinner(_)) {
+            self.app_status.status_line = StatusLine::None;
+        }
+    }
+
+    fn info_notification(&mut self, msg: String) {
+        self.app_status.status_line = StatusLine::NotificationInfo(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
+    }
+
+    fn success_notification(&mut self, msg: String) {
+        self.app_status.status_line = StatusLine::NotificationSuccess(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
+    }
+
+    fn warn_notification(&mut self, msg: String) {
+        self.app_status.status_line = StatusLine::NotificationWarn(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
+    }
+
+    fn error_notification(&mut self, msg: String) {
+        self.app_status.status_line = StatusLine::NotificationError(msg);
+        self.app_status.notification_timestamp = Some(std::time::Instant::now());
+    }
+
+    fn copy_to_clipboard(&self, name: String, value: String) {
+        match copy_to_clipboard(value, &self.ctx.core_config.external.clipboard) {
+            Ok(_) => {
+                let msg = format!("Copied {name} to clipboard successfully");
+                self.ec.send(AppEvent::NotifySuccess(msg));
+            }
+            Err(msg) => {
+                self.ec.send(AppEvent::NotifyError(msg));
+            }
+        }
+    }
+
+    fn copy_raw_to_clipboard(&mut self, value: String, success_message: String) {
+        match copy_to_clipboard(value, &self.ctx.core_config.external.clipboard) {
+            Ok(_) => self.success_notification(success_message),
+            Err(msg) => self.error_notification(msg),
+        }
+    }
+
+    // Phase 2 - Dialog management
+    fn open_dialog(&mut self, kind: DialogKind) {
+        // Short-circuit the Rebase dialog when a previous rebase is still
+        // paused, the user can't sensibly plan a NEW rebase until they
+        // resolve / abort the running one. Route straight to the editor
+        // so its resume panel takes over.
+        if matches!(&kind, DialogKind::Rebase { .. })
+            && crate::git::rebase::rebase_in_progress(self.repository.path())
+        {
+            self.ec.send(AppEvent::OpenInteractiveRebase {
+                base_hash: String::new(),
+            });
+            return;
+        }
+        let before = std::mem::take(&mut self.view);
+        self.view = View::Dialog(Box::new(crate::view::dialog::DialogView::new(
+            before,
+            kind,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn close_dialog(&mut self) {
+        if let View::Dialog(mut dialog) = std::mem::take(&mut self.view) {
+            self.view = dialog.take_before_view();
+            self.view.clear_graph_images();
+            // Also clear avatar prepared images so ratatui re-emits those cells
+            // and clears any dialog text residue (image cells have skip=true which
+            // would otherwise leave dialog content visible over the avatar area).
+            self.ctx
+                .avatar_manager
+                .lock()
+                .unwrap()
+                .clear_prepared_images();
+        }
+    }
+
+    fn dialog_confirm(&mut self) {
+        // DialogConfirm is handled by the DialogView itself via handle_event
+        // This method is called when the dialog sends DialogConfirm event
+        // In practice, DialogView sends ExecuteGitAction directly on Confirm
+    }
+
+    fn check_abort_operation(&mut self) {
+        let git_dir = self.repository.path();
+        match actions::detect_in_progress(git_dir) {
+            Some(actions::InProgressOperation::Rebase) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "rebase".into(),
+                });
+            }
+            Some(actions::InProgressOperation::Merge) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "merge".into(),
+                });
+            }
+            Some(actions::InProgressOperation::CherryPick) => {
+                self.open_dialog(DialogKind::ConfirmAbortOperation {
+                    op_name: "cherry-pick".into(),
+                });
+            }
+            None => {
+                self.ec.send(AppEvent::NotifyInfo(
+                    "No rebase or merge in progress".into(),
+                ));
+            }
+        }
+    }
+
+    fn execute_push_current_branch(&mut self) {
+        let repo_path = self.repository.path();
+        // Detect the upstream first (synchronously, fast).
+        // We need to know the branch & remote before spawning the thread.
+        let branch = match self.repository.head() {
+            Head::Branch { name } => name.clone(),
+            _ => {
+                self.ec
+                    .send(AppEvent::NotifyError("Cannot push: not on a branch".into()));
+                return;
+            }
+        };
+        let upstream = actions::branch_upstream(repo_path, &branch);
+        let no_upstream = upstream.as_ref().map_or(true, |u| u.is_empty());
+        if no_upstream {
+            // Ask the user to pick a remote before pushing.
+            match actions::get_remotes(repo_path) {
+                Ok(remotes) if !remotes.is_empty() => {
+                    self.open_dialog(DialogKind::ChooseRemote { remotes, branch });
+                }
+                _ => {
+                    self.ec.send(AppEvent::NotifyError(
+                        "No remotes configured. Add a remote first.".into(),
+                    ));
+                }
+            }
+            return;
+        }
+        let remote = upstream
+            .unwrap_or_default()
+            .split('/')
+            .next()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "origin".to_string());
+        self.start_spinner("Pushing\u{2026}");
+        let tx = self.ec.sender();
+        let repo_path_buf = repo_path.to_path_buf();
+        thread::spawn(move || {
+            let result = actions::push_branch(&repo_path_buf, &remote, &branch, false);
+            match result {
+                Ok(msg) => {
+                    let msg = if msg.is_empty() {
+                        "Pushed successfully".into()
+                    } else {
+                        msg
+                    };
+                    tx.send(AppEvent::NotifySuccess(msg));
+                    tx.send(AppEvent::CiPoke);
+                }
+                Err(msg) => {
+                    tx.send(AppEvent::NotifyError(msg));
+                }
+            }
+        });
+    }
+
+    fn execute_pull_current_branch(&mut self) {
+        let repo_path = self.repository.path();
+        let branch = match self.repository.head() {
+            Head::Branch { name } => name.clone(),
+            _ => {
+                self.ec
+                    .send(AppEvent::NotifyError("Cannot pull: not on a branch".into()));
+                return;
+            }
+        };
+        let remote = actions::branch_upstream(repo_path, &branch)
+            .ok()
+            .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+            .unwrap_or_else(|| "origin".to_string());
+        self.start_spinner("Pulling\u{2026}");
+        let tx = self.ec.sender();
+        let repo_path_buf = repo_path.to_path_buf();
+        thread::spawn(
+            move || match actions::pull_branch(&repo_path_buf, &remote, &branch) {
+                Ok(msg) => {
+                    let msg = if msg.is_empty() {
+                        "Pulled successfully".into()
+                    } else {
+                        msg
+                    };
+                    tx.send(AppEvent::Refresh(RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some(msg),
+                    }));
+                }
+                Err(msg) => {
+                    tx.send(AppEvent::NotifyError(msg));
+                }
+            },
+        );
+    }
+
+    // Phase 2 - Git Actions execution
+    fn execute_git_action(&mut self, target: String, action: GitAction) {
+        let repo_path = self.repository.path();
+        let is_refs_action = matches!(
+            &action,
+            GitAction::AddRemote { .. }
+                | GitAction::RemoveRemote
+                | GitAction::AddWorktree { .. }
+                | GitAction::DeleteWorktree { .. }
+        );
+        let should_checkout_worktree =
+            matches!(&action, GitAction::AddWorktree { checkout: true, .. });
+        let pushed_new_branch = matches!(&action, GitAction::PushSetUpstream { .. });
+        // Pre-compute the auto-generated worktree path before `action` is consumed.
+        let worktree_raw_path = if let GitAction::AddWorktree { name, .. } = &action {
+            worktree_path_for_branch(repo_path, name)
+        } else {
+            String::new()
+        };
+        let should_auto_fetch = matches!(
+            action,
+            GitAction::Commit { .. }
+                | GitAction::Stash { .. }
+                | GitAction::Push
+                | GitAction::PushBranch { .. }
+                | GitAction::PushTag
+                | GitAction::AddTag { .. }
+        );
+        // Track plain Checkout so we can intercept the "local changes would
+        // be overwritten" error and offer Stash/Discard recovery options.
+        let checkout_target = if matches!(&action, GitAction::Checkout) {
+            Some(target.clone())
+        } else {
+            None
+        };
+        // Skip the "Rebasing…" spinner when the user picked Interactive
+        // the action handler will hand off to InteractiveRebaseView via an
+        // early-return, and the spinner would otherwise replace the footer
+        // shortcuts with the spinner text for the entire editor session.
+        if matches!(
+            &action,
+            GitAction::Rebase {
+                interactive: false,
+                ..
+            }
+        ) {
+            self.start_spinner("Rebasing\u{2026}");
+        }
+        if matches!(&action, GitAction::Merge { .. }) {
+            self.start_spinner("Merging\u{2026}");
+        }
+        let (result, success_label) = match action {
+            GitAction::Checkout => {
+                let r = actions::checkout_commit(repo_path, &target);
+                (r, None)
+            }
+            GitAction::CheckoutDiscard => {
+                // Discard everything (tracked + untracked) then checkout.
+                let r = actions::discard_all(repo_path)
+                    .and_then(|_| actions::clean_untracked(repo_path))
+                    .and_then(|_| actions::checkout_commit(repo_path, &target));
+                (r, None)
+            }
+            GitAction::CheckoutStash => {
+                // Auto-stash current changes (including untracked) then checkout.
+                let msg = format!("git-tui auto-stash before checkout: {}", target);
+                let r = actions::stash(repo_path, Some(&msg), true)
+                    .and_then(|_| actions::checkout_commit(repo_path, &target));
+                (r, None)
+            }
+            GitAction::CreateBranch { name, checkout } => (
+                actions::create_branch_at(repo_path, &name, &target, checkout),
+                None,
+            ),
+            GitAction::AddTag {
+                name,
+                annotated,
+                message,
+            } => {
+                let msg = if annotated { message.as_deref() } else { None };
+                (actions::create_tag(repo_path, &name, &target, msg), None)
+            }
+            GitAction::CherryPick {
+                no_commit,
+                record_origin,
+            } => (
+                actions::cherry_pick(repo_path, &target, no_commit, record_origin),
+                None,
+            ),
+            GitAction::Revert => (actions::revert_commit(repo_path, &target), None),
+            GitAction::Drop => (actions::drop_commit(repo_path, &target), None),
+            GitAction::Merge {
+                no_ff,
+                squash,
+                no_commit,
+            } => (
+                actions::merge_commit(repo_path, &target, no_ff, squash, no_commit),
+                None,
+            ),
+            GitAction::Rebase {
+                ignore_date,
+                interactive,
+            } => {
+                // Interactive rebase hijacks the action: instead of running
+                // `git rebase -i` (which would open the user's $EDITOR),
+                // hand off to the dedicated InteractiveRebaseView so the
+                // todo is edited inside git_tui. The non-interactive path
+                // still runs the plain `git rebase` underneath.
+                if interactive {
+                    self.ec.send(AppEvent::OpenInteractiveRebase {
+                        base_hash: target.clone(),
+                    });
+                    self.close_dialog();
+                    return;
+                }
+                (
+                    actions::rebase_onto(repo_path, &target, ignore_date, interactive),
+                    None,
+                )
+            }
+            GitAction::SquashWithParent => {
+                // Like the interactive rebase hijack above, squash uses
+                // its own machinery and reports via notifications, not
+                // through the standard GitResult path.
+                self.close_dialog();
+                self.squash_with_parent(target);
+                return;
+            }
+            GitAction::MergePullRequest { method } => {
+                // Merge via GitHub REST API on a worker thread. The PR
+                // view picks up the result via PullRequestActionDone
+                // (same channel as comment writes), so on success the
+                // view re-fetches the PR detail and shows it as merged.
+                self.close_dialog();
+                self.merge_pull_request(target, method);
+                return;
+            }
+            GitAction::DeletePrComment {
+                pr_number,
+                is_review,
+            } => {
+                self.close_dialog();
+                self.delete_pr_comment(target, pr_number, is_review);
+                return;
+            }
+            GitAction::SetPullRequestState { pr_number, state } => {
+                self.close_dialog();
+                self.set_pull_request_state(pr_number, state);
+                return;
+            }
+            GitAction::SetPullRequestDraft {
+                pr_number,
+                node_id,
+                draft,
+            } => {
+                self.close_dialog();
+                self.set_pull_request_draft(pr_number, node_id, draft);
+                return;
+            }
+            GitAction::SetPullRequestLabels { pr_number, labels } => {
+                self.close_dialog();
+                self.set_pull_request_labels(pr_number, labels);
+                return;
+            }
+            GitAction::SetPullRequestReviewers {
+                pr_number,
+                to_add,
+                to_remove,
+            } => {
+                self.close_dialog();
+                self.set_pull_request_reviewers(pr_number, to_add, to_remove);
+                return;
+            }
+            GitAction::Reset { mode } => (actions::reset(repo_path, &target, &mode), None),
+            GitAction::DeleteBranch { force } => {
+                (actions::delete_branch(repo_path, &target, force), None)
+            }
+            GitAction::RenameBranch { new_name } => {
+                (actions::rename_branch(repo_path, &target, &new_name), None)
+            }
+            GitAction::PushBranch { force } => {
+                let remote = actions::branch_upstream(repo_path, &target)
+                    .ok()
+                    .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "origin".to_string());
+                (
+                    actions::push_branch(repo_path, &remote, &target, force),
+                    None,
+                )
+            }
+            GitAction::PullBranch { rebase: _ } => {
+                let remote = actions::branch_upstream(repo_path, &target)
+                    .ok()
+                    .and_then(|u| u.split('/').next().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "origin".to_string());
+                (actions::pull_branch(repo_path, &remote, &target), None)
+            }
+            GitAction::Fetch => (actions::fetch(repo_path), None),
+            GitAction::DeleteTag => (actions::delete_tag(repo_path, &target), None),
+            GitAction::PushTag => (actions::push_commit(repo_path, &target), None),
+            GitAction::ApplyStash => (actions::apply_stash(repo_path, &target), None),
+            GitAction::PopStash => (actions::pop_stash(repo_path, &target), None),
+            GitAction::DropStash => (actions::drop_stash(repo_path, &target), None),
+            GitAction::CreateBranchFromStash { branch_name } => (
+                actions::create_branch_from_stash(repo_path, &branch_name, &target),
+                None,
+            ),
+            GitAction::StageFile { file } => (
+                actions::stage_file(repo_path, &file),
+                Some(format!("Staged {}", file)),
+            ),
+            GitAction::StageAll => (
+                actions::stage_all(repo_path),
+                Some("Staged all files".into()),
+            ),
+            GitAction::UnstageFile { file } => (
+                actions::unstage_file(repo_path, &file),
+                Some(format!("Unstaged {}", file)),
+            ),
+            GitAction::UnstageAll => (
+                actions::unstage_all(repo_path),
+                Some("Unstaged all files".into()),
+            ),
+            GitAction::DiscardFile { file } => (
+                actions::discard_file(repo_path, &file),
+                Some(format!("Discarded {}", file)),
+            ),
+            GitAction::DiscardAll => (
+                actions::discard_all(repo_path),
+                Some("Discarded all changes".into()),
+            ),
+            GitAction::Stash {
+                message,
+                include_untracked,
+            } => (
+                actions::stash(repo_path, message.as_deref(), include_untracked),
+                Some("Stashed changes".into()),
+            ),
+            GitAction::Commit { message, amend } => {
+                let label = if amend { "Amended commit" } else { "Committed" };
+                (
+                    actions::commit(repo_path, &message, amend),
+                    Some(label.to_string()),
+                )
+            }
+            GitAction::CleanUntracked => (
+                actions::clean_untracked(repo_path),
+                Some("Cleaned untracked files".into()),
+            ),
+            GitAction::Push => (actions::push_commit(repo_path, &target), None),
+            GitAction::AbortRebase => (actions::abort_rebase(repo_path), None),
+            GitAction::AbortMerge => (actions::abort_merge(repo_path), None),
+            GitAction::AbortCherryPick => (actions::abort_cherry_pick(repo_path), None),
+            GitAction::CreateArchive => {
+                let r = std::process::Command::new("git")
+                    .current_dir(repo_path)
+                    .args([
+                        "archive",
+                        "--format=zip",
+                        "-o",
+                        &format!("{}.zip", target),
+                        &target,
+                    ])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .map_err(|e| format!("Failed to create archive: {}", e));
+                (r, None)
+            }
+            GitAction::AddRemote { url } => (actions::add_remote(repo_path, &target, &url), None),
+            GitAction::RemoveRemote => (actions::remove_remote(repo_path, &target), None),
+            GitAction::PushSetUpstream { branch } => (
+                actions::push_set_upstream(repo_path, &target, &branch),
+                Some(format!(
+                    "Pushed and set upstream to '{}/{}'.",
+                    target, branch
+                )),
+            ),
+            GitAction::SetUpstream { branch } => (
+                actions::set_upstream(repo_path, &target, &branch),
+                Some(format!("Upstream set to '{}/{}'.", target, branch)),
+            ),
+            GitAction::AddWorktree { name, .. } => {
+                let wt_path = worktree_path_for_branch(repo_path, &name);
+                (
+                    actions::add_worktree(repo_path, &wt_path, &name),
+                    Some(format!("Worktree '{}' created", wt_path)),
+                )
+            }
+            GitAction::DeleteWorktree { force } => (
+                actions::delete_worktree(repo_path, &target, force),
+                Some("Worktree removed".to_string()),
+            ),
+        };
+
+        match result {
+            Ok(_) => {
+                if pushed_new_branch {
+                    self.ci.poke();
+                }
+                self.close_dialog();
+                if is_refs_action {
+                    if let Some(label) = success_label {
+                        self.ec.send(AppEvent::NotifySuccess(label));
+                    }
+                    if let View::Refs(ref mut view) = self.view {
+                        view.refresh();
+                    } else {
+                        self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                            list_context: crate::view::ListRefreshViewContext {
+                                commit_hash: String::new(),
+                                selected: 0,
+                                height: 20,
+                                scroll_to_top: false,
+                            },
+                            pending_notification: None,
+                        }));
+                    }
+                    if should_checkout_worktree && !worktree_raw_path.is_empty() {
+                        // Resolve the absolute path now that git has created the worktree.
+                        let abs_path = actions::list_worktrees(repo_path)
+                            .into_iter()
+                            .find(|wt| {
+                                // Match by last path component or suffix
+                                std::path::Path::new(&wt.path).to_string_lossy().ends_with(
+                                    worktree_raw_path
+                                        .trim_start_matches("../")
+                                        .trim_start_matches("./"),
+                                ) || wt.path == worktree_raw_path
+                            })
+                            .map(|wt| wt.path)
+                            .unwrap_or_else(|| {
+                                // Fallback: join with repo_path and normalize manually
+                                repo_path
+                                    .join(&worktree_raw_path)
+                                    .to_string_lossy()
+                                    .to_string()
+                            });
+                        self.ec.send(AppEvent::SwitchWorktree { path: abs_path });
+                    }
+                } else if let Some(label) = success_label {
+                    self.ec.send(AppEvent::NotifySuccess(label));
+                    self.ec.send(AppEvent::RefreshUncommitted);
+                } else {
+                    self.ec.send(AppEvent::Refresh(RefreshViewContext::List {
+                        list_context: crate::view::ListRefreshViewContext {
+                            commit_hash: String::new(),
+                            selected: 0,
+                            height: 20,
+                            scroll_to_top: false,
+                        },
+                        pending_notification: Some("Operation completed successfully".into()),
+                    }));
+                }
+                if should_auto_fetch {
+                    self.ec.send(AppEvent::BackgroundFetch);
+                }
+            }
+            Err(msg) => {
+                // If a plain checkout failed because of a dirty working tree,
+                // surface the recovery dialog (Stash / Discard / Cancel)
+                // instead of just printing the raw git error.
+                if let Some(target) = checkout_target {
+                    if msg.contains("would be overwritten by checkout")
+                        || msg.contains("overwritten by checkout")
+                    {
+                        self.close_dialog();
+                        let is_branch =
+                            !target.chars().all(|c| c.is_ascii_hexdigit()) || target.len() < 7;
+                        self.ec.send(AppEvent::OpenDialog(
+                            crate::event::DialogKind::CheckoutHasLocalChanges { target, is_branch },
+                        ));
+                        return;
+                    }
+                }
+                self.ec.send(AppEvent::NotifyError(msg));
+            }
+        }
+    }
+
+    fn open_branch_detail(&mut self, branch_name: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::BranchDetail(ref mut view) => view.take_list_state(),
+            View::TagDetail(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let repo_path = self.repository.path();
+        let is_remote = branch_name.contains('/');
+        let upstream = actions::branch_upstream(repo_path, &branch_name).ok();
+        let (ahead, behind, comparison_label) = if upstream.is_some() {
+            let a = actions::branch_ahead_count(repo_path, &branch_name).unwrap_or_default();
+            let b = actions::branch_behind_count(repo_path, &branch_name).unwrap_or_default();
+            let label = upstream.clone().unwrap_or_default();
+            (a, b, label)
+        } else if branch_name != self.ctx.git_default_branch {
+            let default = self.ctx.git_default_branch.clone();
+            let (a, b) = actions::branch_ahead_behind_vs(repo_path, &branch_name, &default)
+                .unwrap_or_default();
+            (a, b, default)
+        } else {
+            (String::new(), String::new(), String::new())
+        };
+        let (tip_hash, tip_commit_message, tip_author, tip_date) =
+            actions::branch_tip_detail(repo_path, &branch_name).unwrap_or_default();
+        let metadata = BranchMetadata {
+            branch_name: branch_name.clone(),
+            is_remote,
+            tip_hash,
+            tip_commit_message,
+            tip_author,
+            tip_date,
+            upstream,
+            ahead,
+            behind,
+            comparison_label,
+        };
+        self.view =
+            View::BranchDetail(Box::new(crate::view::branch_detail::BranchDetailView::new(
+                branch_name,
+                metadata,
+                commit_list_state,
+                self.ctx.clone(),
+                self.ec.sender(),
+            )));
+    }
+
+    fn open_tag_detail(&mut self, tag_name: String) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            View::BranchDetail(ref mut view) => view.take_list_state(),
+            View::TagDetail(ref mut view) => view.take_list_state(),
+            _ => None,
+        };
+        let repo_path = self.repository.path();
+        let info = actions::tag_info(repo_path, &tag_name).unwrap_or_else(|_| actions::TagInfo {
+            tag_type: "Tag".to_string(),
+            target_hash: String::new(),
+            target_commit_message: String::new(),
+            tagger: None,
+            date: None,
+            message: None,
+        });
+        let metadata = TagMetadata {
+            tag_name: tag_name.clone(),
+            tag_type: info.tag_type,
+            target_hash: info.target_hash,
+            target_commit_message: info.target_commit_message,
+            tagger: info.tagger,
+            date: info.date,
+            message: info.message,
+        };
+        self.view = View::TagDetail(Box::new(crate::view::tag_detail::TagDetailView::new(
+            tag_name,
+            metadata,
+            commit_list_state,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn open_uncommitted(&mut self) {
+        let commit_list_state = match self.view {
+            View::List(ref mut view) => Some(view.take_list_state()),
+            View::Detail(ref mut view) => Some(view.take_list_state()),
+            View::UserCommand(ref mut view) => Some(view.take_list_state()),
+            View::Refs(ref mut view) => Some(view.take_list_state()),
+            _ => None,
+        };
+        let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
+
+        let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+            let diff_result = if is_staged {
+                DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+            } else {
+                DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+            };
+            match diff_result {
+                Ok(diff_entry) => diff_entry.count_additions_and_deletions(),
+                Err(_) => (0, 0),
+            }
+        };
+
+        let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+            let (additions, deletions) = load_diff_stats(f, is_staged);
+            crate::widget::uncommitted::UncommittedFile {
+                status: f.status.clone(),
+                path: f.path.clone(),
+                old_path: f.old_path.clone(),
+                additions,
+                deletions,
+            }
+        };
+
+        let staged: Vec<_> = changes.staged.iter().map(|f| convert(f, true)).collect();
+        let unstaged: Vec<_> = changes.unstaged.iter().map(|f| convert(f, false)).collect();
+        let untracked: Vec<_> = changes
+            .untracked
+            .iter()
+            .map(|f| convert(f, false))
+            .collect();
+        self.view = View::Uncommitted(Box::new(crate::view::uncommitted::UncommittedView::new(
+            unstaged,
+            staged,
+            untracked,
+            commit_list_state,
+            self.ctx.clone(),
+            self.ec.sender(),
+        )));
+    }
+
+    fn stage_file(&mut self, file: String) {
+        match actions::stage_file(self.repository.path(), &file) {
+            Ok(_) => {
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Staged {}", file)));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn unstage_file(&mut self, file: String) {
+        match actions::unstage_file(self.repository.path(), &file) {
+            Ok(_) => {
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Unstaged {}", file)));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn discard_file(&mut self, file: String) {
+        match actions::discard_file(self.repository.path(), &file) {
+            Ok(_) => {
+                self.ec
+                    .send(AppEvent::NotifySuccess(format!("Discarded {}", file)));
+                self.ec.send(AppEvent::RefreshUncommitted);
+            }
+            Err(msg) => self.ec.send(AppEvent::NotifyError(msg)),
+        }
+    }
+
+    fn refresh_uncommitted(&mut self) {
+        if let View::Uncommitted(ref mut view) = self.view {
+            let selected_path = view.selected_path().map(|s| s.to_string());
+            let _was_section = view.section();
+
+            let changes = UncommittedChanges::load(self.repository.path()).unwrap_or_default();
+
+            let load_diff_stats = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                let diff_result = if is_staged {
+                    DiffEntry::load_staged_for_file(self.repository.path(), &f.path)
+                } else {
+                    DiffEntry::load_unstaged_for_file(self.repository.path(), &f.path)
+                };
+
+                match diff_result {
+                    Ok(diff_entry) => {
+                        let (additions, deletions) = diff_entry.count_additions_and_deletions();
+                        (additions, deletions)
+                    }
+                    Err(_) => (0, 0),
+                }
+            };
+
+            let convert = |f: &crate::git::status::FileStatus, is_staged: bool| {
+                let (additions, deletions) = load_diff_stats(f, is_staged);
+                crate::widget::uncommitted::UncommittedFile {
+                    status: f.status.clone(),
+                    path: f.path.clone(),
+                    old_path: f.old_path.clone(),
+                    additions,
+                    deletions,
+                }
+            };
+
+            view.staged = changes.staged.iter().map(|f| convert(f, true)).collect();
+            view.unstaged = changes.unstaged.iter().map(|f| convert(f, false)).collect();
+            view.untracked = changes
+                .untracked
+                .iter()
+                .map(|f| convert(f, false))
+                .collect();
+
+            if let Some(ref path) = selected_path {
+                view.reselect(path);
+            }
+        }
+    }
+}
+
+fn worktree_path_for_branch(_repo_path: &std::path::Path, name: &str) -> String {
+    name.to_string()
+}
+
+fn selected_commit_details(
+    repository: &Repository,
+    commit_list_state: &CommitListState,
+) -> (Commit, Vec<FileChange>, Vec<Ref>) {
+    let selected = commit_list_state.selected_commit_hash().clone();
+    let (commit, changes) = repository.commit_detail(&selected);
+    let refs: Vec<Ref> = repository.refs(&selected).into_iter().cloned().collect();
+    (commit, changes, refs)
+}
+
+fn head_commit_hash_from_repository(repository: &Repository) -> Option<crate::git::CommitHash> {
+    match repository.head() {
+        Head::Detached { target } => Some(target.clone()),
+        Head::Branch { name } => {
+            // Look up the commit hash that the branch points to via refs
+            repository.all_refs().into_iter().find_map(|r| {
+                if let crate::git::Ref::Branch {
+                    name: ref_name,
+                    target,
+                } = r
+                {
+                    if ref_name == name {
+                        Some(target.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        }
+        Head::None => None,
+    }
+}
+
+fn process_numeric_prefix(
+    numeric_prefix: &str,
+    user_event: UserEvent,
+    _key_event: KeyEvent,
+) -> UserEventWithCount {
+    if user_event.is_countable() {
+        let count = if numeric_prefix.is_empty() {
+            1
+        } else {
+            numeric_prefix.parse::<usize>().unwrap_or(1)
+        };
+        UserEventWithCount::new(user_event, count)
+    } else {
+        UserEventWithCount::from_event(user_event)
+    }
+}
+
+fn extract_user_command_by_number(
+    user_command_number: usize,
+    ctx: &AppContext,
+) -> Result<&UserCommand, String> {
+    ctx.core_config
+        .user_command
+        .commands
+        .get(&user_command_number.to_string())
+        .ok_or_else(|| format!("No user command configured for number {user_command_number}",))
+}
+
+fn extract_user_command_refresh_by_number(user_command_number: usize, ctx: &AppContext) -> bool {
+    extract_user_command_by_number(user_command_number, ctx)
+        .map(|c| c.refresh)
+        .unwrap_or_default()
+}
+
+fn build_external_command_parameters_and_exec_command(
+    commit: &Commit,
+    refs: &[Ref],
+    user_command_number: usize,
+    view_area: Rect,
+    ctx: &AppContext,
+) -> Result<String, String> {
+    build_external_command_parameters(commit, refs, user_command_number, view_area, ctx)
+        .and_then(exec_user_command)
+}
+
+fn build_external_command_parameters<'a>(
+    commit: &'a Commit,
+    refs: &'a [Ref],
+    user_command_number: usize,
+    view_area: Rect,
+    ctx: &'a AppContext,
+) -> Result<ExternalCommandParameters<'a>, String> {
+    let command = &extract_user_command_by_number(user_command_number, ctx)?.commands;
+    let target_hash = commit.commit_hash.as_str();
+    let parent_hashes = commit
+        .parent_commit_hashes
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+
+    let mut all_refs = vec![];
+    let mut branches = vec![];
+    let mut remote_branches = vec![];
+    let mut tags = vec![];
+    for r in refs {
+        match r {
+            Ref::Tag { .. } => tags.push(r.name()),
+            Ref::Branch { .. } => branches.push(r.name()),
+            Ref::RemoteBranch { .. } => remote_branches.push(r.name()),
+            Ref::Stash { .. } => continue, // skip stashes
+        }
+        all_refs.push(r.name());
+    }
+
+    let area_width = view_area.width.saturating_sub(4); // minus the left and right padding
+    let area_height = (view_area.height.saturating_sub(1))
+        .min(ctx.ui_config.user_command.height)
+        .saturating_sub(1); // minus the top border
+    Ok(ExternalCommandParameters {
+        command,
+        target_hash,
+        parent_hashes,
+        all_refs,
+        branches,
+        remote_branches,
+        tags,
+        area_width,
+        area_height,
+    })
+}
+
+/// Why the global `R` / `I` shortcuts can't open the PR / Issues views right
+/// now, or `None` when they can. Shown as a warning when the key is pressed,
+/// so the shortcut never fails silently. Not being logged in comes first: it
+/// is the usual cause, and the remote check is moot until the user connects.
+fn github_unavailable_reason(
+    is_authenticated: bool,
+    has_github_remote: bool,
+) -> Option<&'static str> {
+    if !is_authenticated {
+        Some("GitHub login required: open the config view and connect under GitHub Auth.")
+    } else if !has_github_remote {
+        Some("No GitHub remote found on this repo.")
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[test]
+    fn github_unavailable_reason_asks_for_login_first() {
+        let reason = github_unavailable_reason(false, false).unwrap();
+        assert!(reason.contains("login"), "{reason}");
+        // Same answer whether or not there is a remote: login is the blocker.
+        assert_eq!(github_unavailable_reason(false, true), Some(reason));
+    }
+
+    #[test]
+    fn github_unavailable_reason_reports_missing_remote_once_logged_in() {
+        let reason = github_unavailable_reason(true, false).unwrap();
+        assert!(reason.contains("remote"), "{reason}");
+    }
+
+    #[test]
+    fn github_unavailable_reason_is_none_when_everything_is_ready() {
+        assert_eq!(github_unavailable_reason(true, true), None);
+    }
+
+    #[rustfmt::skip]
+    #[rstest]
+    #[case("",    UserEvent::NavigateDown, UserEventWithCount::new(UserEvent::NavigateDown, 1))] // no prefix
+    #[case("5",   UserEvent::NavigateUp,   UserEventWithCount::new(UserEvent::NavigateUp, 5))] // with prefix
+    #[case("0",   UserEvent::PageDown,     UserEventWithCount::new(UserEvent::PageDown, 1))] // zero should be converted to 1
+    #[case("42",  UserEvent::ScrollDown,   UserEventWithCount::new(UserEvent::ScrollDown, 42))] // multi-digit number
+    #[case("999", UserEvent::PageDown,     UserEventWithCount::new(UserEvent::PageDown, 999))] // large number
+    #[case("abc", UserEvent::ScrollUp,     UserEventWithCount::new(UserEvent::ScrollUp, 1))] // should fallback to 1
+    #[case("5",   UserEvent::Quit,         UserEventWithCount::new(UserEvent::Quit, 1))] // non-countable event with prefix
+    #[case("",    UserEvent::Confirm,      UserEventWithCount::new(UserEvent::Confirm, 1))] // non-countable event without prefix
+    fn test_process_numeric_prefix(
+        #[case] numeric_prefix: &str,
+        #[case] user_event: UserEvent,
+        #[case] expected: UserEventWithCount,
+    ) {
+        let dummy_key_event = KeyEvent::from(KeyCode::Enter); // KeyEvent is not used in the logic
+        let actual = process_numeric_prefix(numeric_prefix, user_event, dummy_key_event);
+        assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod header_path_tests {
+    use super::{ci_label, header_path_layout, shorten_path_prefix, PathLayout, CI_GAP};
+
+    #[test]
+    fn the_running_workflow_is_named_after_the_dot_when_there_is_room() {
+        assert_eq!(
+            ci_label("git-tui demo", 20, 80).as_deref(),
+            Some("git-tui demo")
+        );
+        // Cut with an ellipsis rather than overflowing.
+        let cut = ci_label("Dependabot Updates", 20, 30).unwrap();
+        assert!(
+            cut.ends_with('…') && console::measure_text_width(&cut) <= 30 - 20 - 3,
+            "{cut}"
+        );
+        // No room, or nothing to say: the dot stands alone.
+        assert_eq!(ci_label("git-tui demo", 20, 24), None);
+        assert_eq!(ci_label("  ", 20, 80), None);
+        assert_eq!(ci_label("x", 79, 80), None, "offset past the width");
+    }
+
+    #[test]
+    fn the_dot_sits_right_after_the_path() {
+        let l = header_path_layout("~/gitstore/", "git-tui", 60, true);
+        assert_eq!(
+            l,
+            PathLayout {
+                prefix: "~/gitstore/".into(),
+                dot_offset: Some(1 + 11 + 6 + CI_GAP)
+            }
+        );
+        let none = header_path_layout("~/gitstore/", "git-tui", 60, false);
+        assert_eq!(none.dot_offset, None);
+    }
+
+    #[test]
+    fn the_path_is_cut_by_the_middle_to_make_room_for_the_dot() {
+        // 1 + 11 + 6 = 18 for the path alone, + 5 for the gap and the dot: 23 > 20.
+        let l = header_path_layout("~/gitstore/", "git-tui", 20, true);
+        assert_eq!(l.prefix, "~/…/");
+        assert_eq!(l.dot_offset, Some(1 + 4 + 6 + CI_GAP));
+    }
+
+    #[test]
+    fn nothing_overlaps_the_right_side_whatever_the_width() {
+        for width in 0..80usize {
+            for with_dot in [false, true] {
+                let l =
+                    header_path_layout("/home/aterrak/work/clients/", "monrepo", width, with_dot);
+                if let Some(dot) = l.dot_offset {
+                    assert!(dot + 2 <= width, "width {width}: dot at {dot}");
+                    let text = 1 + console::measure_text_width(&l.prefix) + 7;
+                    assert!(text < dot, "width {width}: text {text} dot {dot}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_prefix_that_fits_is_kept() {
+        assert_eq!(shorten_path_prefix("~/gitstore/", 20), "~/gitstore/");
+        assert_eq!(shorten_path_prefix("", 5), "");
+    }
+
+    #[test]
+    fn a_long_prefix_is_cut_by_the_middle() {
+        assert_eq!(shorten_path_prefix("~/work/clients/", 10), "~/…/");
+        assert_eq!(
+            shorten_path_prefix("/home/aterrak/gitstore/", 10),
+            "/home/…/"
+        );
+        assert_eq!(shorten_path_prefix("~/work/clients/", 4), "~/…/");
+    }
+
+    #[test]
+    fn very_little_room_keeps_only_the_ellipsis_or_nothing() {
+        assert_eq!(shorten_path_prefix("~/work/clients/", 3), "…/");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 2), "…/");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 1), "");
+        assert_eq!(shorten_path_prefix("~/work/clients/", 0), "");
+    }
+}
+
+#[cfg(test)]
+mod footer_layout_tests {
+    use super::*;
+
+    #[test]
+    fn the_footer_grows_by_taking_rows_from_the_view_not_from_the_screen() {
+        let area = Rect::new(0, 0, 80, 30);
+        let [h1, v1, g1, s1] = split_app_areas_with_header(area, 1);
+        let [h3, v3, g3, s3] = split_app_areas_with_header(area, 3);
+        assert_eq!((s1.height, s3.height), (1, 3));
+        // The header and the gap keep their size, the view gives up the rows.
+        assert_eq!((h1.height, g1.height), (h3.height, g3.height));
+        assert_eq!(v1.height, v3.height + 2);
+        // Together they still fill the screen exactly.
+        assert_eq!(h3.height + v3.height + g3.height + s3.height, 30);
+        // A zero is a footer of one row, never none.
+        assert_eq!(split_app_areas_with_header(area, 0)[3].height, 1);
+    }
+}

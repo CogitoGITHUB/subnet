@@ -1,0 +1,495 @@
+# Changelog
+
+Notable, user-facing changes per release. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+versions follow SemVer.
+
+## [Unreleased]
+
+## [0.16.3] (2026-10-28)
+
+### Added
+
+- `ssh-manager pick` opens the picker in the rows under your prompt, prints the name of the host you
+  choose, and connects to nothing, so you can search the inventory from the shell without
+  leaving the line you are typing. Your prompt is where you left it afterwards and nothing the
+  list drew stays behind. The list goes to stderr, so `host=$(ssh-manager pick)` captures the name
+  and nothing else; marked rows (`^s`) print one name per line; quitting without choosing prints
+  nothing and exits 1. An optional query prefills the search box.
+- `ssh-manager pick --height ROWS` and the `pick_height` config key (default 15) set how many rows it
+  uses; `0` or `--full-screen` takes the whole terminal instead. A height taller than the window
+  is clamped so your prompt keeps a row.
+- Pick mode answers only the chooser keys: filter, move, `^s` to mark, `Enter`, `Esc`, `^c`.
+  Adding, editing, deleting and the other screens are inert there, so a picker your shell fires
+  off on a keypress cannot change the database on the way past.
+- `contrib/ssh-manager.plugin.zsh` and `contrib/ssh-manager.bash` bind the picker to Alt-s. On an empty
+  line you get `ssh-manager web-01` ready to run, mid-line you get the host name at the cursor, and
+  marked hosts give you every name for a loop. They work with Oh My Zsh, zinit, antidote, or a
+  plain `source`. Details in the new
+  [Shell integration](https://max-rh.github.io/sshelf/shell.html) page.
+
+### Changed
+
+- `auth = "agent"` is documented for what it actually is: ssh-manager wires nothing and runs plain
+  `ssh user@host`, so host-based authentication, GSSAPI/Kerberos and appliances that need no
+  secret all work with it. The failed-authentication message no longer assumes an agent was
+  involved, and `doctor`'s ssh-agent warning is explained for fleets that have no agent by
+  design. No code or file-format change for existing hosts.
+
+## [0.16.1] (2026-10-27)
+
+### Added
+
+- `ssh-manager add --credential NAME` (`-c`) binds a host to a shared credential as it is created, so
+  a scripted rollout is one call per group and one call per node rather than an `add` and a
+  `bind` for every host. It works with `--from-ssh --quiet` too, and an invalid name fails
+  before the host is written.
+- `ssh-manager credentials add NAME --password-stdin` stores the credential's secret in the same call
+  that defines it, which makes one call per group enough. The full loop is in the
+  [CLI reference](https://max-rh.github.io/sshelf/cli.html).
+- Shell completion for credential names, on `--credential` and `credentials bind`. Names a host
+  already uses complete even when they were never declared.
+
+### Fixed
+
+- `ssh-manager add --credential X --password-stdin` stored the password under the host's own id, which
+  a bound host never reads, so the password was silently useless. It now goes to the credential.
+  The flag is new in this release, so no stored secret was affected.
+- `ssh-manager add`, `ssh-manager sites add` and `ssh-manager import` refuse to save when another ssh-manager process
+  changed `hosts.toml` since they read it, instead of replacing that change. The credential
+  commands already did this in 0.16.0. A sequential script is unaffected; parallel invocations
+  now fail rather than quietly losing hosts.
+- A host added with a credential that already has a secret no longer prints the "no password
+  stored" note, and one whose credential is empty names the credential in the advice rather than
+  the host.
+
+## [0.16.0] (2026-10-27)
+
+### Added
+
+- Hosts that share one login password can now share one stored secret. Name a credential, point
+  hosts at it, and rotating is a single write instead of one per host:
+  `ssh-manager credentials add corp-ldap`, `ssh-manager credentials bind corp-ldap web-01 web-02`,
+  `printf %s "$PASS" | ssh-manager set-password --credential corp-ldap`. `hosts.toml` holds only the
+  name; the secret still lives in the keyring or the vault. `ssh-manager credentials` lists who uses
+  what and whether a secret is actually stored.
+- `Ctrl-s` marks hosts in the list and `Ctrl-k` sets a password for all of them, or binds them to
+  a shared credential, or unbinds them. With nothing marked it acts on whatever the filter is
+  showing, so `tag:prod` then `Ctrl-k` covers a group. Hosts that already have a secret are
+  skipped unless you turn replacing on with `Ctrl-r`, and the counts are on screen. A bulk write
+  is not checked against the hosts (that would be one login each); a wrong one shows up on that
+  host's next connect, as it already did.
+- `ssh-manager <host> -- COMMAND ...` runs one command on the host instead of opening a shell and
+  exits with the command's own status. `-t` asks for a pty. The command reaches only that
+  connect: it is never stored on the host, never seen by the transfer screen, the forward builder
+  or `ssh-manager export`.
+
+### Changed
+
+- `ssh-manager set-password <host>` on a host that uses a shared credential sets that credential, and
+  says how many hosts it just changed.
+- Deleting a host no longer deletes its stored secret when the host was reading from a shared
+  credential, since the other hosts on it still need the value.
+- A `hosts.toml` that uses shared credentials declares `format_version = 2`. One that does not
+  keeps declaring `1`, so upgrading does not by itself produce a file an older ssh-manager refuses.
+
+### Fixed
+
+- `ssh-manager sites --json` works. It has been documented since sites shipped but was rejected
+  unless you spelled out `ssh-manager sites list --json`. The same applies to the new
+  `ssh-manager credentials --json`.
+- A `hosts.toml` declaring a `format_version` newer than the running ssh-manager understands is now
+  refused with a message telling you to upgrade, instead of being parsed and then rewritten
+  without the parts it did not recognise.
+- The CLI paths that edit `hosts.toml` refuse to save when another ssh-manager changed the file since
+  they read it, instead of replacing that change. An atomic write never corrupted the file, but
+  it could not prevent a lost update.
+- `ssh-manager set-password` with empty stdin prints its message again. It was swallowed to a bare
+  `Error:` because the text contains a `|`.
+
+## [0.15.0] (2026-09-14)
+
+### Added
+
+- `ssh-manager add --from-ssh` saves a host from a working ssh command line:
+  `ssh-manager add --from-ssh 'ssh -i key.pem -p 2222 user@host'`, `"$(fc -ln -1)"` for the one you
+  just ran, or the line on stdin. It reads ssh's own options and opens the add form with the user,
+  port, keys and jump hosts filled in and everything else kept as extra args, so what's left to
+  type is the secret. `-v`, `-N`, `-f`, `-o StrictHostKeyChecking` and a few others are dropped,
+  with a note saying why. `--quiet` adds the host without the form.
+- Connecting to a password host with nothing stored, or to a key host whose key needs a
+  passphrase, asks for it on the terminal, checks it with one throwaway `ssh ... exit`, and keeps
+  it only if that worked. A key your agent already holds is never asked about, and `Enter` skips.
+  This is what a copied, generated or hand-written `hosts.toml` was missing, since its hosts have
+  no secrets stored yet. A 2FA host saves the password without the check, because checking would
+  use up the code.
+
+### Changed
+
+- tmux mode opens the new window or pane in the background, so focus stays on the picker. It used
+  to switch to the new window. A host that is about to be asked for its first secret connects in
+  place instead, with a line saying why.
+
+### Fixed
+
+- An upload could overwrite a file that appeared in the remote directory after ssh-manager checked
+  the listing and before the bytes landed. A single file now uploads to a private
+  `.ssh-manager-part-` name and is installed under its real name with `sftp`'s `ln`, which the server
+  refuses if the name is taken, so the send is skipped instead. Downloads have worked this way
+  since the transfer screen shipped. Folders still rest on the listing check, in both
+  directions, and are the only send that does.
+- Uploading a single file into a remote directory whose listing was cut short at 50,000 entries
+  is no longer refused, since that upload no longer depends on the listing. Folders are still
+  refused there.
+- A wrong stored password or passphrase was handed to ssh again on every retry, and the failure
+  read like the server refusing you. The askpass helper now notices ssh asking the same question
+  twice in one connect, prints `ssh-manager: the stored password for <id> was refused; replace it with
+  ssh-manager set-password or ^e in the TUI`, and stops answering. The stored secret is left alone. The
+  transfer screen and port forwards name the stored secret in the same situation.
+
+## [0.14.1] (2026-09-12)
+
+### Fixed
+
+- The remote transfer pane could not list a directory on a host whose accounts come from
+  AD/LDAP. `sftp`'s `ls -l` prints the server's own listing line, which carries the owner and
+  group as names, so a group called `domain users` added a column and pushed part of the
+  timestamp onto the front of every filename, which broke navigation. The listing now asks for
+  `ls -lan`, which is formatted by the client with numeric ids, so a group name can no longer
+  move the columns. Thanks to @ReubenM for the report and the fix. (#20)
+- Opening a transfer screen or starting a port forward on a key host whose passphrase is not
+  stored and not in your agent used to print `ssh`'s passphrase prompt on top of the TUI, where
+  no keystroke could reach it, and then fail a minute later with a message blaming the password.
+  Both now run with `BatchMode=yes` when there is nothing to supply, so they fail in about a
+  second and say what to do about it: load the key with `ssh-add`, or store its passphrase on
+  the host. (#18)
+- Ctrl- and Alt- shortcuts no longer type their bare letter into whichever form field had
+  focus. `Ctrl-a` in the port-forward popup put an `a` in the field instead of doing nothing;
+  the same went for the host wizard, the settings screen and the sites editor. (#19)
+
+### Changed
+
+- The port-forward popup's keybind hint now describes the selected row. It used to advertise
+  `←/→ change` on every row, but the arrows only change the `Type` chooser. On a text field
+  they just move the cursor, which reads as a dead key. (#19)
+
+
+## [0.14.0] (2026-09-09)
+
+### Security
+
+An outside security review of the tree read the source, the config, the history, the
+dependencies and the CI, and found thirteen things worth fixing. This release closes all of
+them. None was a remote code execution or a leak in the default setup, but two of them undercut
+promises the docs were already making.
+
+- The askpass helper now knows whether the stored secret is a login password or a key
+  passphrase, and only answers the matching prompt. Before, a server that asked `Password:`
+  over keyboard-interactive could be handed a key passphrase, because the text of that prompt
+  is written by the server and `Password:` is a perfectly ordinary shape. A key host now
+  answers only OpenSSH's own `Enter passphrase for key '<path>':`, and only when the path is one
+  of the key files ssh-manager passed with `-i`.
+- Key hosts connect with `PreferredAuthentications=publickey` (plus `keyboard-interactive` for
+  2FA hosts), so a server can no longer steer a key host into a password prompt. If a key host
+  of yours relied on falling back to a password, add the password as a second host or switch its
+  auth to password.
+- Jump hosts never see the askpass helper. With one jump host and a stored secret the hop runs
+  with `BatchMode=yes` and password and keyboard-interactive auth off, which is what the FAQ
+  always said jump hosts had to be. With two or more hops, ssh asks for the target's secret on
+  the terminal instead, and ssh-manager says so before it does.
+- The transfer screen's control socket moved from `/tmp` into a private directory under
+  `$XDG_RUNTIME_DIR` (or the data dir) with mode 0700, so another local user can't squat on the
+  path and stall or answer the connection.
+- Remote listings and mkdir over sftp have a timeout and an output cap, and closing the transfer
+  screen no longer waits forever on a stuck server.
+- Temporary files are created exclusively with random names, forward logs moved from `/tmp` into
+  the data directory with mode 0600, and the transfer log refuses to follow a symlink.
+- `ssh-manager list`, `ssh-manager import`, `ssh-manager doctor` and the shell completions replace terminal
+  control characters in host and site fields before printing them. `ssh-manager list --json` is
+  unchanged. The add/edit form and the importers now refuse a name that carries one.
+- The 2FA code is masked while you type it, in the TUI and on the command line.
+- ssh-manager no longer changes the permissions of a config directory it didn't create. `ssh-manager
+  doctor` warns if that directory is world- or group-writable, or is not yours.
+- Downloads land under a temporary name and are installed without replacing an existing file.
+  Uploads are still checked against the last listing, which is refreshed right before a send;
+  the docs now say what that check does and does not promise.
+- Release workflows: every action is pinned to a commit, the version input can't reach a shell
+  unescaped, companion jobs build the exact commit the release built and refuse to publish if
+  the tag has moved, permissions are read-only except where a job uploads, and release artifacts
+  now carry build attestations.
+
+### Changed
+
+- `Ctrl-y` and `ssh-manager print-command` resolve the host's stored secret first, so the command they
+  give you is the one ssh-manager would run, including the `ProxyCommand` a jump host gets. The
+  `command` field of `ssh-manager list --json` is unchanged: a listing has no business reading the
+  keyring once per host.
+
+## [0.13.1] (2026-09-04)
+
+### Fixed
+- The host list now shows the user a host inherits from its site, instead of falling back
+  to your local `$USER`. Only the display was ever wrong: connecting, `Ctrl-y` and
+  `ssh-manager print-command` already used the site's user. The fix covers the TUI rows,
+  `ssh-manager list` and shell-completion help, and searching for that user now matches the hosts
+  that inherit it. `ssh-manager list --json` is unchanged, and still reports the record as stored,
+  so an inherited `user` stays `null` with the resolved values in the generated `command`.
+  (#16)
+- The remote pane of the transfer screen now lists hidden files, as the local pane always
+  did, so you can open `.config` on a server and copy things out of it. ssh-manager lists over SFTP
+  with `ls -la`; `.` and `..` still never appear on either side. There is no show/hide toggle,
+  and typing a `.` into the pane filter keeps the names that have one. (#15)
+
+### Changed
+- README rewritten as a landing page: a re-recorded demo clip, one section and one real
+  screenshot per feature (`docs/assets/`), why the project exists, a comparison with the tools
+  people weigh it against, and the never-list stated as promises. New `PRIVACY.md` at the
+  repo root (what ssh-manager reads, writes, runs, and sends) and `docs/llms.txt`. Docs and
+  assets only, no behavior change.
+
+## [0.13.0] (2026-08-21)
+
+### Added
+- `ssh-manager doctor` is one command that checks the things that quietly break connections and
+  names the fix for each: the OpenSSH version (8.4+ is what stored passwords ride on), whether
+  your secret backend actually opens, whether `hosts.toml` parses and has no duplicate names or
+  ids, hosts pointing at a site that no longer exists, stored secrets whose host is gone, a
+  missing or stale `$SSH_AUTH_SOCK` when hosts use agent auth, and an exported ssh_config
+  fragment that has drifted from your hosts. Each line is `ok` / `warn` / `fail` with one
+  runnable next action; it **exits 1** if anything failed, so `ssh-manager doctor && ...` works in a
+  script. Local and read-only throughout. It never contacts a host, and the only write is a
+  throwaway keyring entry it deletes again. Full page:
+  [Checking your setup](https://max-rh.github.io/sshelf/doctor.html). No new dependencies.
+
+### Fixed
+- Global flags now work before a subcommand. `ssh-manager --config FILE list` used to be read as
+  "connect to a host named `list`", and `ssh-manager --config FILE set-password web` failed to parse
+  at all, despite `--config` being documented as global. Both now work, on either side of the
+  subcommand, as does `--transfer-log`. (Combining a host name *and* a subcommand, as in
+  `ssh-manager prod-web list`, is now refused explicitly instead of silently running the subcommand
+  and dropping the host.)
+
+### Changed
+- Every user-facing error now names the thing, the cause, and the next action. A failed save
+  names the file it couldn't write instead of just "save failed"; an unknown host, a duplicate
+  site, and an empty `--password-stdin` each say what to run instead; a failed `ssh` launch asks
+  whether OpenSSH is on your `PATH`; a forward that can't authenticate says what to check; an
+  undecryptable vault names the environment variable to fix.
+- The FAQ answers that used to end in a shrug now end in `ssh-manager doctor`.
+
+## [0.12.0] (2026-08-21)
+
+### Added
+- tmux mode: set `tmux = "window"` or `"pane"` (in `config.toml`, or on the `F2` settings
+  screen) and, when ssh-manager is running inside tmux, `Enter` opens the host in a new tmux window
+  (named after it) or a new pane and **leaves you in the picker**, so you can fire off several
+  connections in a row. Outside tmux, or with the default `"off"`, connecting is unchanged:
+  tear down, hand the terminal to `ssh`, exit to your shell. Frecency is recorded before the
+  window opens, exactly as before the `exec()`. Hosts whose authentication would have to travel
+  through tmux's command line (a
+  [2FA](https://max-rh.github.io/sshelf/passwords-2fa.html#two-factor-2fa-hosts) verification
+  code, or a stored secret in vault mode) connect in place instead and say why; only the
+  askpass wiring (never a secret) is ever passed to tmux. No new dependencies: ssh-manager runs your
+  own `tmux` binary.
+- Transfer: mark several and send them at once. `Space` marks the file or folder under the
+  cursor, `Ctrl-a` marks everything the filter shows (again to clear), and `Ctrl-s` sends the
+  whole set (folders recursively) through the one authenticated connection, counting through
+  the batch. An entry the destination already has is skipped and the queue carries on; the
+  summary names what was passed over. `Esc` now clears marks before clearing the filter.
+- Transfer: create directories with `F7` (or `Ctrl-f`) on either side, through a one-line input
+  at the bottom of the focused pane. It creates exactly one directory in that pane's current
+  directory, never adopts an existing name, and puts the new directory under the cursor.
+
+### Fixed
+- Cancelling a transfer with `Esc` left the transfer screen stuck in its "transfer running"
+  state, ignoring every key but `Esc` and `Ctrl-c`. It now reports the cancellation and returns
+  to browsing.
+
+### Changed
+- The `F1` help overlay documents the transfer screen's keys and the active tmux mode.
+- README, FAQ, and the docs site point at
+  [GitHub Discussions](https://github.com/max-rh/sshelf/discussions) for questions and feature
+  requests.
+
+## [0.11.0] (2026-07-27)
+
+### Added
+- `ssh-manager import --tailscale` imports your Tailscale tailnet: every eligible machine
+  becomes a searchable ssh-manager host in one command. Runs **your own** `tailscale` CLI
+  (`tailscale status --json`) and maps each peer's MagicDNS name to the host name, its FQDN to
+  the hostname (stable across IP churn; the Tailscale IP when MagicDNS is off), your tailnet to
+  a [site](https://max-rh.github.io/sshelf/sites-tags.html), and its ACL tags to ssh-manager tags.
+  Mullvad exit nodes and machines shared in from other tailnets are left out, expired nodes are
+  skipped, and offline machines are imported (being asleep is temporary). Add-only: hosts
+  and sites that already exist are never touched, so re-running adds 0. As ever, nothing
+  under `~/.ssh` is written. ssh-manager still makes no network calls of its own: the CLI runs only
+  when you type the command, never at startup or in the background. `$SSH_MANAGER_TAILSCALE_BIN`
+  points at the binary if it isn't on your `PATH` (the macOS app doesn't add it). No new
+  dependencies.
+
+### Changed
+- `ssh-manager import` now reports how many parsed hosts were skipped as duplicates, and prints any
+  site it creates.
+
+## [0.10.0] (2026-07-12)
+
+### Added
+- `ssh-manager export` projects the host database as an ssh_config fragment, written to
+  `~/.config/ssh-manager/ssh_config`; add one `Include` line to `~/.ssh/config` yourself (ssh-manager
+  still never edits it, or anything under `~/.ssh`). Plain `ssh`/`scp`/`sftp`, rsync, git, and
+  anything that reads SSH config (VS Code Remote-SSH, JetBrains Gateway) then resolve ssh-manager
+  hosts by name, with users, ports, identities, jump hosts, and inherited site defaults
+  included. Exact `-o Key=Value` extra-args translate to real directives; other raw flags stay
+  visible as a comment. Once the file exists it refreshes automatically on every hosts change
+  (add/edit/delete, import, site changes); output is deterministic and diff-friendly.
+  `--stdout` prints the fragment instead of writing. No new dependencies.
+
+### Changed
+- Docs: [the site](https://max-rh.github.io/sshelf/) now opens with a full user guide
+  (install, quickstart, per-feature pages, CLI reference, configuration, FAQ), and the README
+  is a shorter landing page that links into it. No behavior changes.
+
+## [0.9.0] (2026-06-23)
+
+### Added
+- Install from [crates.io](https://crates.io/crates/ssh-manager) with `cargo install ssh-manager`
+  (published automatically on each release).
+- RedHat/Fedora `.rpm` packages (x86_64 + aarch64) attached to every release, built as a static
+  musl binary so they run on any RPM distro (Fedora, RHEL/Rocky/Alma, openSUSE) regardless of glibc.
+
+## [0.8.0] (2026-06-23)
+
+### Added
+- Two-factor (2FA) hosts: flag a host (add/edit form, or `ssh-manager add ... --2fa`) whose login
+  needs an interactive verification code (TOTP / keyboard-interactive). On connect, ssh-manager shows a
+  popup to enter the current code and supplies it to the prompt through the same `SSH_ASKPASS`
+  helper that supplies a stored password. That fixes connects that previously failed, because a
+  stored-secret connect runs with `SSH_ASKPASS_REQUIRE=force` (which routes the code prompt to the
+  helper with no terminal fallback). `ssh-manager <host>` from the CLI prompts on the terminal. Manual
+  entry only, no TOTP seeds are stored. No new dependencies.
+
+## [0.7.0] (2026-06-22)
+
+### Added
+- Background port forwarding (`Ctrl-f` on a host): a popup to start a **Local** (`-L`),
+  **Remote** (`-R`) or **Dynamic** (`-D` SOCKS) SSH tunnel, reusing the host's auth exactly as
+  connect does (keys / agent / ProxyJump / stored password, plus site defaults). The forward runs
+  as a detached background process that **keeps running after you quit ssh-manager**, and a bind/auth
+  failure (port in use, privileged port, server refused) is reported in the popup. A new
+  **forwards manager** (`F4`) lists every active forward across hosts with its pid and age and
+  stops any (`d`/`k` → `y`); the list refreshes live and is reconciled against the running
+  processes on each launch, so it only ever shows forwards that are still actually running.
+  Tracked in `forwards.json`. No new dependencies.
+
+## [0.6.0] (2026-06-20)
+
+### Added
+- Sites group hosts (one site per host, e.g. a data center / project), distinct from the
+  many-valued free-form tags. A site can carry optional shared SSH defaults: user, port,
+  ProxyJump (bastion), identity. Member hosts inherit them at connect time where the host
+  leaves a field unset (the host always wins; auth stays per-host). The list **groups by site**
+  when idle and shows a `·site·` column + `site:NAME` filter while typing. Manage sites with
+  **F3** (create/edit/delete + their defaults); assign one in the add/edit form. CLI: `ssh-manager
+  sites [--json]`, `ssh-manager sites add NAME [-u/-p/-J/-i]`, and `ssh-manager add --site NAME`. Stored in
+  `hosts.toml` as `[[site]]`; old files load unchanged.
+
+## [0.5.0] (2026-06-16)
+
+### Added
+- Dual-pane file transfer (`Ctrl-t` on a host): a two-pane browser, local files on one
+  side and the host's on the other, to copy files and folders either direction over SFTP, with
+  fuzzy search on both sides and live progress. Authenticates **once** via an `ssh` ControlMaster
+  that reuses the host's existing auth (keys / agent / ProxyJump, or a stored password through
+  `SSH_ASKPASS`), then runs `sftp` over it: no PTY, no per-file re-prompt, and `~/.ssh/config`
+  is never touched. `Tab` switches panes, `→`/`Enter` opens a directory, `Ctrl-s` sends the
+  selection, `Esc` cancels; a same-named destination is skipped (not overwritten) and symlinks
+  are flagged and skipped. No new dependencies.
+- `--transfer-log <FILE>` (also `$SSH_MANAGER_TRANSFER_LOG`) appends the transfer screen's
+  `ssh`/`sftp` commands and their errors to a file for debugging. No secrets are logged.
+
+## [0.4.0] (2026-06-14)
+
+### Added
+- `ssh-manager add` opens the TUI add form when run bare, and adds a host non-interactively
+  when given arguments (`NAME` + `--hostname` required; `--user/--port/--auth/--identity/--jump/
+  --tag/--extra`, and `--password-stdin` to store a secret without it touching argv). Auth is
+  inferred from `--identity`/`--password-stdin`. Replaces the previous placeholder message.
+- `ssh-manager list --json` gives machine-readable output (each host's fields plus its generated
+  `ssh` command), always valid JSON, and a stable surface for scripts and integrations.
+- `ssh-manager -` reconnects to the most-recently-used host.
+- Dynamic shell completion of saved host names (`clap_complete` engine). Enable with
+  `source <(COMPLETE=<shell> ssh-manager)`; completes the `<host>` of direct-connect, `print-command`,
+  and `set-password`.
+- CI: a dependency-audit job (`cargo audit`) and an MSRV (1.88) check.
+
+### Changed
+- README states the no-network posture explicitly: no telemetry, no account, no network calls
+  of ssh-manager's own.
+- `SECURITY.md` now lists concrete private-reporting channels (GitHub security advisories +
+  email) and documents the vault-mode environment tradeoff.
+
+### Fixed
+- The vault master passphrase (`SSH_MANAGER_VAULT_PASSPHRASE`) is no longer inherited by the
+  exec'd `ssh` for hosts with no stored secret. (For hosts that use a stored secret in vault
+  mode it remains available to the askpass helper, which requires it, and that is now
+  documented.)
+
+## [0.3.0] (2026-06-12)
+
+### Added
+- `ssh-manager print-command <host>` prints the generated, shell-quoted `ssh ...` command for a
+  saved host without connecting or updating frecency, the CLI equivalent of the TUI's `Ctrl-y`
+  yank. (#3)
+
+### Fixed
+- Generated/yanked command strings now expand identity-file `~` before shell-quoting, so a
+  quoted path (e.g. one containing spaces) stays copy-paste runnable. (#3)
+
+## [0.2.0] (2026-06-07)
+
+### Added
+- Direct connect: `ssh-manager <host>` connects to a saved host by name or id without opening
+  the TUI, on the same connect path (frecency recorded, stored secret auto-supplied).
+  A miss suggests the closest matching names.
+- List filtering: `ssh-manager list [query]` filters with the same syntax as the TUI search
+  box, with fuzzy text and/or `tag:NAME` tokens (e.g. `ssh-manager list tag:prod`).
+
+## [0.1.0] (2026-06-06)
+
+Initial public release.
+
+- Fuzzy-search TUI launcher for saved SSH hosts (type to filter, `Enter` to connect),
+  atuin-style, with tag filters (`tag:NAME`) and frecency ordering.
+- Connect hands the terminal to `ssh` via `exec()`, so on logout you're back at your shell.
+- Add/edit/delete via a single-screen, auth-aware form; `.pem`-aware key picker with an
+  in-TUI file browser; quick-add with sensible defaults.
+- Password / key-passphrase auto-supply via `SSH_ASKPASS`: secrets live in the OS keyring
+  (macOS Keychain / Linux Secret Service) or an `age`-encrypted vault for headless use.
+  Never in `hosts.toml`, never on the command line.
+- Jump-host chains (`-J`), custom ports, extra ssh flags per host.
+- Read-only import from `~/.ssh/config` (`ssh-manager import`, `Ctrl-o`).
+- `Ctrl-y` yanks the generated `ssh` command; `F2` settings (hosts-file location);
+  `ssh-manager completions <shell>` and `ssh-manager man`.
+- Packaging: Homebrew tap, shell installer, Debian/Ubuntu `.deb` (x86_64 + arm64, macOS +
+  Linux).
+
+[Unreleased]: https://github.com/max-rh/sshelf/compare/v0.16.3...HEAD
+[0.16.3]: https://github.com/max-rh/sshelf/compare/v0.16.1...v0.16.3
+[0.16.1]: https://github.com/max-rh/sshelf/compare/v0.16.0...v0.16.1
+[0.16.0]: https://github.com/max-rh/sshelf/compare/v0.15.0...v0.16.0
+[0.15.0]: https://github.com/max-rh/sshelf/compare/v0.14.1...v0.15.0
+[0.14.1]: https://github.com/max-rh/sshelf/compare/v0.14.0...v0.14.1
+[0.14.0]: https://github.com/max-rh/sshelf/compare/v0.13.1...v0.14.0
+[0.13.1]: https://github.com/max-rh/sshelf/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/max-rh/sshelf/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/max-rh/sshelf/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/max-rh/sshelf/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/max-rh/sshelf/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/max-rh/sshelf/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/max-rh/sshelf/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/max-rh/sshelf/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/max-rh/sshelf/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/max-rh/sshelf/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/max-rh/sshelf/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/max-rh/sshelf/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/max-rh/sshelf/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/max-rh/sshelf/releases/tag/v0.1.0

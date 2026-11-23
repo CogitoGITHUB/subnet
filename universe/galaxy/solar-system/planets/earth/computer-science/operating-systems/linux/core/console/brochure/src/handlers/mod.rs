@@ -1,0 +1,167 @@
+//! Key event handlers routed by app state.
+//!
+//! Dispatches keyboard input to state-specific handlers (feed list, article detail, settings, etc.).
+
+pub(crate) mod article;
+mod category_picker;
+mod changelog;
+mod feed_editor;
+mod feed_list;
+mod freshrss;
+mod link_hints;
+pub(crate) mod mouse;
+mod saved_category_editor;
+mod settings;
+
+use crossterm::event::{KeyCode, KeyEvent};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::{
+    app::App,
+    models::{AppEvent, AppState},
+};
+
+/// Handles key events while zen mode is active (full-screen article reading).
+fn handle_zen_mode(app: &mut App, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('z') | KeyCode::Esc => app.zen_mode = false,
+        KeyCode::Char('q') => return true,
+        KeyCode::Down | KeyCode::Char('j') => app.scroll_article(1),
+        KeyCode::Up | KeyCode::Char('k') => app.scroll_article(-1),
+        KeyCode::PageDown => app.scroll_article(app.article_page()),
+        KeyCode::PageUp => app.scroll_article(-app.article_page()),
+        KeyCode::Home => app.scroll_article(i32::MIN / 2),
+        KeyCode::End => app.scroll_article(i32::MAX / 2),
+        KeyCode::Char('n') => app.move_article_cursor(true),
+        KeyCode::Char('p') => app.move_article_cursor(false),
+        _ => {}
+    }
+    false
+}
+
+/// True when keystrokes are typed into a text field (so letters are not shortcuts).
+fn is_text_input(app: &App) -> bool {
+    matches!(
+        app.state,
+        AppState::AddFeed
+            | AppState::ExportPath
+            | AppState::ImportPath
+            | AppState::FreshRssSetup
+            | AppState::FeedEditorRename
+            | AppState::SavedCategoryEditorRename
+            | AppState::SavedCategoryEditorNew
+    ) || (app.state == AppState::CategoryPicker && app.category_picker.new_mode)
+}
+
+/// Keys while the keybindings popup is open (it swallows everything else).
+fn handle_help(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => {
+            app.help_open = false;
+        }
+        KeyCode::Down => app.help_scroll = app.help_scroll.saturating_add(1),
+        KeyCode::Up => app.help_scroll = app.help_scroll.saturating_sub(1),
+        KeyCode::PageDown => app.help_scroll = app.help_scroll.saturating_add(10),
+        KeyCode::PageUp => app.help_scroll = app.help_scroll.saturating_sub(10),
+        _ => {}
+    }
+}
+
+/// Route a key event to the correct handler based on the current app state.
+pub async fn handle_key(app: &mut App, key: KeyEvent, tx: &UnboundedSender<AppEvent>) -> bool {
+    // Keyboard navigation always brings wheel-scrolled lists back to their cursor. A
+    // text selection survives (it scrolls with its text) until its view goes away.
+    app.detached = Default::default();
+    // Only an immediate second `A` confirms "mark all as read"; help, link hints and
+    // zoom return before the article handler, so any other key cancels it here.
+    if key.code != KeyCode::Char('A') {
+        app.mark_all_armed = false;
+    }
+    if app.zoom.take().is_some() {
+        return false; // any key closes the zoomed image
+    }
+    // Before the j/k remap: they are label letters here.
+    if app.link_hints.is_some() {
+        link_hints::handle_key(app, key, tx);
+        return false;
+    }
+
+    // Outside text fields, j/k always mean ↓/↑ so every list and view agrees.
+    let mut key = key;
+    if !is_text_input(app) {
+        key.code = match key.code {
+            KeyCode::Char('j') => KeyCode::Down,
+            KeyCode::Char('k') => KeyCode::Up,
+            code => code,
+        };
+    }
+    if app.help_open {
+        handle_help(app, key);
+        return false;
+    }
+    let global_keys = !is_text_input(app)
+        && app.update_available.is_none()
+        && app.feed_editor.delete_cat.is_none();
+    match key.code {
+        KeyCode::Char('?') if global_keys => {
+            app.help_open = true;
+            app.help_scroll = 0;
+            return false;
+        }
+        KeyCode::Char(c @ ('f' | 'F')) if global_keys => {
+            link_hints::start(app, c == 'F');
+            return false;
+        }
+        _ => {}
+    }
+    if app.zen_mode {
+        return handle_zen_mode(app, key);
+    }
+    if app.update_available.is_some() {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.update_popup_scroll = app.update_popup_scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.update_popup_scroll = app.update_popup_scroll.saturating_add(1);
+            }
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                app.update_available = None;
+                app.update_popup_scroll = 0;
+            }
+            _ => {}
+        }
+        return false;
+    }
+    match app.state {
+        AppState::AddFeed => settings::handle_add_feed(app, key, tx),
+        AppState::SettingsList => return settings::handle_settings(app, key, tx),
+        AppState::FreshRssSetup => freshrss::handle_freshrss_setup(app, key, tx),
+        AppState::ExportPath | AppState::ImportPath => settings::handle_file_prompt(app, key, tx),
+        AppState::ClearData => settings::handle_confirm_delete_all(app, key),
+        AppState::ClearArticleCache => settings::handle_confirm_clear_cache(app, key),
+        AppState::ArticleList | AppState::ArticleDetail => {
+            return article::handle_article(app, key, tx).await;
+        }
+        AppState::FeedList => return feed_list::handle_feed_list(app, key, tx),
+        AppState::SavedCategoryList => return feed_list::handle_saved_feed_list(app, key),
+        AppState::FeedEditor | AppState::FeedEditorRename => {
+            feed_editor::handle_feed_editor(app, key, tx)
+        }
+        AppState::CategoryPicker => category_picker::handle_category_picker(app, key, tx),
+        AppState::SavedCategoryEditor => {
+            saved_category_editor::handle_saved_category_editor(app, key)
+        }
+        AppState::SavedCategoryEditorRename => {
+            saved_category_editor::handle_saved_category_editor_rename(app, key)
+        }
+        AppState::SavedCategoryEditorDeleteConfirm => {
+            saved_category_editor::handle_saved_category_editor_delete_confirm(app, key)
+        }
+        AppState::SavedCategoryEditorNew => {
+            saved_category_editor::handle_saved_category_editor_new(app, key)
+        }
+        AppState::Changelog => return changelog::handle_changelog(app, key),
+    }
+    false
+}

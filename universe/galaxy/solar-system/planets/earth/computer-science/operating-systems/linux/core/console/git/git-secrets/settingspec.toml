@@ -1,0 +1,9 @@
+[spec]
+envfile.default = "./.git-secrets/secrets/examples/.env.cott.age"
+export.stdout = true
+
+decryption.key.env = "GIT_SECRETS_IDENTITY"
+decryption.key.path = "~/.config/git-secrets/identity"
+
+[settings]
+key._.default.env = "SECRET"

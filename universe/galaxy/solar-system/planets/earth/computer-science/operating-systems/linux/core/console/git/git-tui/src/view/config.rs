@@ -1,0 +1,2567 @@
+use std::{rc::Rc, thread};
+
+use ratatui::{
+    crossterm::event::KeyEvent,
+    layout::{Alignment, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Padding, Paragraph, Wrap},
+    Frame,
+};
+
+use crate::{
+    app::AppContext,
+    config::{save, ConflictViewMode, CoreConfig, DiffMode, RebaseViewMode, UiConfig},
+    event::{AppEvent, Sender, UserEvent, UserEventWithCount},
+    github_auth::{self, GithubAuthState},
+    view::{graph_preview::GraphPreview, View},
+    GraphRenderer, GraphStyle, GraphWidthType, InitialSelection, SelectionMode,
+};
+
+// Adding a setting? Besides the config field (`CoreOptionConfig` or the UI
+// config, its accessor and `save`), this page needs, in order:
+//   1. the index below, and the indices of the rows after it shifted;
+//   2. its entry in `items` and `descriptions` (render), `config_left_width`,
+//      and the two cycle functions;
+//   3. its entry in `ROW_APPLIES`: WHEN does it take effect (see `ApplyWhen`);
+//   4. the code that applies it, where step 3 says: `App::apply_live_config_settings`
+//      for `Live`, `App::close_config` for `OnClose`.
+//
+// Item indices, listed here so future inserts only have to touch one spot
+// instead of hunting for `selected == N` matches scattered through the file.
+//   0  Renderer            <- RENDERER_INDEX (always selectable; Ascii disables avatars)
+//   1  Graph Enabled       <- GRAPH_ENABLED_INDEX (yes/no toggle, applies on close)
+//   2  Graph Style         <- GRAPH_STYLE_INDEX (grayed when Graph Enabled = no; Smooth excluded in Ascii mode)
+//   3  Graph Width         <- GRAPH_WIDTH_INDEX (grayed when Graph Enabled = no)
+//   4  Diff Mode
+//   5  Resolve Mode
+//   6  Rebase Mode
+//   7  Order
+//   8  Initial Selection
+//   9  Mouse
+//  10  Select Mode         <- SELECT_MODE_INDEX (grayed when Mouse = Off)
+//  11  Date Format
+//  12  Git Name            <- TEXT_EDIT_START_INDEX
+//  13  Git Email
+//  14  Default Branch
+//  15  GitHub Auth         <- GITHUB_AUTH_INDEX
+//  16  Github Avatars      <- GITHUB_AVATARS_INDEX
+const CONFIG_ITEM_COUNT: usize = 17;
+const RENDERER_INDEX: usize = 0;
+const GRAPH_ENABLED_INDEX: usize = 1;
+const GRAPH_STYLE_INDEX: usize = 2;
+const GRAPH_WIDTH_INDEX: usize = 3;
+const MOUSE_INDEX: usize = 9;
+const SELECT_MODE_INDEX: usize = 10;
+const DATE_FORMAT_INDEX: usize = 11;
+const TEXT_EDIT_START_INDEX: usize = 12;
+const GITHUB_AUTH_INDEX: usize = 15;
+const GITHUB_AVATARS_INDEX: usize = 16;
+const CONFIG_ITEM_INDENT: &str = " ";
+
+/// When a change made in this page takes effect. EVERY row has one, decided in
+/// `ROW_APPLIES` below: it is the question to answer when adding a setting.
+///
+/// Every change is saved to the config file the moment it is made. What differs
+/// is when the running app starts to use it, because this page works on its own
+/// copy of the config and the app only reads the settings back in
+/// `App::close_config`, except for the ones applied while the page is open.
+///
+/// How to decide:
+///
+/// - `Live`: apply it at once when the setting changes how THIS PAGE looks or
+///   works, or when the effect can only be judged by trying it right here. The
+///   theme colors the page itself. The mouse and the select mode are used on the
+///   page too: a user who flips Select Mode wants to drag over the page and see.
+///   It must be cheap and safe to apply under an open page, with no rebuild and
+///   no flicker. Code: `App::apply_live_config_settings`.
+/// - `OnClose`: the default. Apply it when the page is left, in
+///   `App::close_config`. Right for anything that rebuilds or re-renders the view
+///   underneath (graph images, layout, the commit list) or reloads the app (the
+///   renderer, the order, whether the graph is on), because doing that while the
+///   page is up would flicker or throw the underlying view away, and nothing on
+///   the page shows the result anyway.
+/// - `NextLaunch`: only saved, read once at startup, and applying it later
+///   would make no sense (the commit the cursor starts on).
+///
+/// Not sure? Ask whether the user could tell it worked without leaving the page.
+/// If they could, and it is safe, it is `Live`; if not, it is `OnClose`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyWhen {
+    Live,
+    OnClose,
+    NextLaunch,
+}
+
+/// One entry per row, in the order of the index list above. The length is tied
+/// to `CONFIG_ITEM_COUNT`, so adding a row without deciding here does not
+/// compile.
+const ROW_APPLIES: [ApplyWhen; CONFIG_ITEM_COUNT] = [
+    ApplyWhen::OnClose,    //  0 Renderer (reloads the app)
+    ApplyWhen::OnClose,    //  1 Graph Enabled (reloads the app)
+    ApplyWhen::OnClose,    //  2 Graph Style (rebakes the graph images)
+    ApplyWhen::OnClose,    //  3 Graph Width (rebakes the graph images)
+    ApplyWhen::OnClose,    //  4 Diff Mode
+    ApplyWhen::OnClose,    //  5 Resolve Mode
+    ApplyWhen::OnClose,    //  6 Rebase Mode
+    ApplyWhen::OnClose,    //  7 Order (reloads the app)
+    ApplyWhen::NextLaunch, //  8 Initial Select (read once at startup)
+    ApplyWhen::Live,       //  9 Mouse (the page uses it)
+    ApplyWhen::Live,       // 10 Select Mode (tried right on the page)
+    ApplyWhen::OnClose,    // 11 Date Format
+    ApplyWhen::OnClose,    // 12 Git Name
+    ApplyWhen::OnClose,    // 13 Git Email
+    ApplyWhen::OnClose,    // 14 Default Branch
+    ApplyWhen::OnClose,    // 15 GitHub Auth (state handed over when leaving)
+    ApplyWhen::OnClose,    // 16 Github Avatars
+];
+
+/// The line under a row's description that says when it takes effect.
+fn apply_note(when: ApplyWhen) -> &'static str {
+    match when {
+        ApplyWhen::Live => "Applied immediately.",
+        ApplyWhen::OnClose => "Applied when you leave this page.",
+        ApplyWhen::NextLaunch => "Applied at the next launch.",
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PendingGithubDevice {
+    user_code: String,
+    verification_uri: String,
+}
+
+impl<'a> std::fmt::Debug for ConfigView<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigView")
+            .field("selected", &self.selected)
+            .field("editing_text", &self.editing_text)
+            .field("editing_value", &self.editing_value)
+            .finish()
+    }
+}
+
+pub struct ConfigView<'a> {
+    before: View<'a>,
+    selected: usize,
+    ctx: Rc<AppContext>,
+    tx: Sender,
+    core_config: CoreConfig,
+    ui_config: UiConfig,
+    github_auth_state: GithubAuthState,
+    github_auth_pending: bool,
+    pending_github_device: Option<PendingGithubDevice>,
+    /// Last `selected` value seen by `render()`, used to gate the
+    /// "snap viewport to keep selected visible" logic so it only fires
+    /// when the SELECTION moved (arrow keys / click on a row), not on
+    /// every paint. Without this, the mouse wheel can never scroll past
+    /// the selected row because the snap pulls the viewport right back.
+    last_rendered_selected: Option<usize>,
+    /// Last (col, row) reported by `handle_mouse_move`. Used to filter
+    /// out synthetic mouse-move events emitted by terminals AFTER a
+    /// scroll wheel tick (the cursor is stationary, but the content
+    /// under it changed because the viewport scrolled). When the new
+    /// position equals the previous one, we treat it as synthetic and
+    /// skip the selection update, that's what lets the wheel scroll
+    /// past the focused row without dragging it along.
+    last_mouse_pos: Option<(u16, u16)>,
+    editing_text: bool,
+    editing_value: String,
+    /// Byte index into `editing_value` where the next char insert lands.
+    /// Updated by Left/Right/Home/End/Ctrl+Left/Ctrl+Right and the delete
+    /// keys. Stays a byte index (not a char index) so byte-level
+    /// `String::insert` / `drain` calls don't have to convert.
+    editing_cursor: usize,
+    graph_preview: Option<GraphPreview>,
+    pending_preview_uploads: Vec<String>,
+    cumulative_preview_image_ids: Vec<u32>,
+    last_preview_rows: Option<(u16, u16)>,
+    pending_preview_deletes: Vec<u16>,
+    left_area: Rect,
+    left_item_rows: Vec<Option<usize>>,
+    /// Top line index of the left-column viewport. Auto-scrolls as the
+    /// cursor moves out of view, plus responds directly to wheel /
+    /// PageUp / PageDown when the cursor is parked at the edge.
+    left_scroll: usize,
+}
+
+impl<'a> ConfigView<'a> {
+    fn config_left_width(&self, total_width: u16) -> u16 {
+        // NOTE: This array is only used to compute the left column width.
+        // The display order in the UI lives in `render()`, see the `items`
+        // vec there for the actual rendering order.
+        let values = [
+            graph_renderer_display(self.core_config.graph_renderer()),
+            if self.ui_config.list.graph_enabled {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
+            graph_style_display(self.core_config.graph_style()),
+            graph_width_display(self.core_config.graph_width()),
+            diff_mode_display(self.ui_config.common.diff_mode),
+            conflict_view_display(self.ui_config.common.conflict_view),
+            rebase_view_display(self.ui_config.common.rebase_view),
+            commit_order_display(self.core_config.order()),
+            initial_selection_display(self.core_config.initial_selection()),
+            mouse_display(self.ui_config.common.mouse_enabled),
+            selection_mode_display(self.core_config.selection_mode()),
+            self.core_config
+                .date_time_format()
+                .display_name()
+                .to_string(),
+            self.core_config
+                .user_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(from git)".into()),
+            self.core_config
+                .user_email()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(from git)".into()),
+            self.core_config
+                .default_branch()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "(from git)".into()),
+            github_auth_display(&self.github_auth_state, self.github_auth_pending),
+            if self.core_config.graph_renderer().is_ascii() {
+                "disabled (ascii)".to_string()
+            } else if self.core_config.github_avatars() {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+        ];
+        let names = [
+            "Theme",
+            "Renderer",
+            "Graph Enabled",
+            "Graph Style",
+            "Graph Width",
+            "Diff Mode",
+            "Resolve Mode",
+            "Rebase Mode",
+            "Order",
+            "Initial Select",
+            "Mouse",
+            "Select Mode",
+            "Date Format",
+            "Git Name",
+            "Git Email",
+            "Default Branch",
+            "GitHub Auth",
+            "Github Avatars",
+        ];
+        let content_width = names
+            .iter()
+            .zip(values.iter())
+            .enumerate()
+            .map(|(i, (_name, value))| {
+                let display = config_value_display(i, value, false, "");
+                CONFIG_ITEM_INDENT.len() + 18 + console::measure_text_width(&display)
+            })
+            .max()
+            .unwrap_or(36) as u16;
+        // Too narrow for a list and its details side by side: the list keeps
+        // the whole width, the details need a wider window.
+        if total_width < 64 {
+            return total_width;
+        }
+        let min_width = 34.min(total_width);
+        let max_width = (total_width.saturating_mul(48) / 100).max(min_width);
+        (content_width + 4).max(min_width).min(max_width)
+    }
+
+    fn auto_resolved_hint(&self) -> Option<String> {
+        match self.selected {
+            RENDERER_INDEX if self.core_config.graph_renderer() == GraphRenderer::Auto => {
+                Some(crate::protocol::auto_detect_name().to_string())
+            }
+            GRAPH_WIDTH_INDEX if self.core_config.graph_width() == crate::GraphWidthType::Auto => {
+                let label = match self.auto_cell_width() {
+                    crate::graph::CellWidthType::Double => "Double",
+                    crate::graph::CellWidthType::Single => "Single",
+                };
+                Some(label.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// What `graph_width = "auto"` gives right now, by the same rule as the
+    /// commit list: it depends on the lanes of the open repository and the
+    /// terminal width. The hint and both previews read it from here so they
+    /// never disagree. Without a list behind (opened from another view) the
+    /// two lanes of the preview graph stand in.
+    fn auto_cell_width(&self) -> crate::graph::CellWidthType {
+        const PREVIEW_LANES: usize = 2;
+        let lanes = match &self.before {
+            View::List(list) => list.graph_lane_count(),
+            _ => None,
+        }
+        .unwrap_or(PREVIEW_LANES);
+        let (width, _) = ratatui::crossterm::terminal::size().unwrap_or((120, 40));
+        crate::check::auto_cell_width(lanes, width as usize)
+    }
+
+    fn render_vertical_separator(&self, f: &mut Frame, area: Rect) {
+        if area.width == 0 {
+            return;
+        }
+        let height = vertical_separator_height(area.height);
+        if height == 0 {
+            return;
+        }
+        let y = area.y;
+        let line = Line::from(Span::styled(
+            "│",
+            Style::default().fg(self.ctx.color_theme.divider_fg),
+        ));
+        for offset in 0..height {
+            let segment = Rect {
+                x: area.x,
+                y: y + offset,
+                width: 1,
+                height: 1,
+            };
+            f.render_widget(Paragraph::new(line.clone()), segment);
+        }
+    }
+
+    pub fn new(before: View<'a>, ctx: Rc<AppContext>, tx: Sender) -> Self {
+        let core_config = ctx.core_config.clone();
+        let ui_config = ctx.ui_config.clone();
+        let github_auth_state = ctx.github_auth_state.clone();
+        Self {
+            before,
+            selected: 0,
+            ctx,
+            tx,
+            core_config,
+            ui_config,
+            github_auth_state,
+            github_auth_pending: false,
+            pending_github_device: None,
+            last_rendered_selected: None,
+            last_mouse_pos: None,
+            editing_text: false,
+            editing_value: String::new(),
+            editing_cursor: 0,
+            graph_preview: None,
+            pending_preview_uploads: Vec::new(),
+            cumulative_preview_image_ids: Vec::new(),
+            last_preview_rows: None,
+            pending_preview_deletes: Vec::new(),
+            left_area: Rect::default(),
+            left_item_rows: Vec::new(),
+            left_scroll: 0,
+        }
+    }
+
+    fn github_avatars_selectable(&self) -> bool {
+        self.github_auth_state.is_authenticated()
+    }
+
+    /// Graph Style and Graph Width depend on the graph being enabled -
+    /// when the user has toggled it off, those rows are grayed out and
+    /// don't respond to cycle / click, mirroring the Github Avatars row
+    /// behaviour when GitHub auth is missing.
+    fn graph_options_selectable(&self) -> bool {
+        self.ui_config.list.graph_enabled
+    }
+
+    /// True when `idx` is a row currently shown dimmed (its underlying
+    /// requirement isn't met). Up/Down arrows skip these so the user
+    /// can't park selection on a row they can't touch; click / hover
+    /// also bail out so the selection doesn't drift onto a dead row.
+    fn is_item_grayed(&self, idx: usize) -> bool {
+        if idx == GITHUB_AVATARS_INDEX
+            && (!self.github_avatars_selectable() || self.core_config.graph_renderer().is_ascii())
+        {
+            return true;
+        }
+        if (idx == GRAPH_STYLE_INDEX || idx == GRAPH_WIDTH_INDEX)
+            && !self.graph_options_selectable()
+        {
+            return true;
+        }
+        // The selection is made with the mouse.
+        if idx == SELECT_MODE_INDEX && !self.ui_config.common.mouse_enabled {
+            return true;
+        }
+        false
+    }
+
+    pub fn handle_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        if self.editing_text {
+            self.handle_text_edit_event(event_with_count, key);
+            return;
+        }
+
+        let event = event_with_count.event;
+        let count = event_with_count.count;
+        match event {
+            UserEvent::NavigateUp | UserEvent::SelectUp if self.selected > 0 => {
+                self.selected -= 1;
+                // Walk past any grayed row in the same direction; only
+                // bail when we hit the top so the user still ends up
+                // on a usable row instead of stuck on a dead one.
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
+                    self.selected -= 1;
+                }
+            }
+            UserEvent::NavigateDown | UserEvent::SelectDown
+                if self.selected + 1 < CONFIG_ITEM_COUNT =>
+            {
+                self.selected += 1;
+                while self.selected + 1 < CONFIG_ITEM_COUNT && self.is_item_grayed(self.selected) {
+                    self.selected += 1;
+                }
+                // Hit the bottom edge on a grayed row - bounce back up
+                // past it to the last usable row.
+                if self.is_item_grayed(self.selected) {
+                    while self.selected > 0 && self.is_item_grayed(self.selected) {
+                        self.selected -= 1;
+                    }
+                }
+            }
+            UserEvent::Confirm => {
+                if self.selected == GITHUB_AUTH_INDEX {
+                    self.handle_github_auth();
+                } else if self.selected == GITHUB_AVATARS_INDEX {
+                    if self.github_avatars_selectable() {
+                        self.cycle_option();
+                    }
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out - no-op.
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option();
+                }
+            }
+            UserEvent::NavigateRight => {
+                if self.selected == GITHUB_AUTH_INDEX {
+                    self.handle_github_auth();
+                } else if self.selected == GITHUB_AVATARS_INDEX {
+                    if self.github_avatars_selectable() {
+                        self.cycle_option();
+                    }
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out - no-op.
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option();
+                }
+            }
+            UserEvent::NavigateLeft => {
+                if self.selected == GITHUB_AUTH_INDEX {
+                    self.handle_github_auth();
+                } else if self.selected == GITHUB_AVATARS_INDEX {
+                    if self.github_avatars_selectable() {
+                        self.cycle_option_prev();
+                    }
+                } else if self.is_item_grayed(self.selected) {
+                    // Grayed out - no-op.
+                } else if config_value_kind(self.selected) == ConfigValueKind::Input {
+                    self.start_text_edit();
+                } else {
+                    self.cycle_option_prev();
+                }
+            }
+            UserEvent::ScrollDown => {
+                let step = count.max(1);
+                self.left_scroll = self.left_scroll.saturating_add(step);
+            }
+            UserEvent::ScrollUp => {
+                let step = count.max(1);
+                self.left_scroll = self.left_scroll.saturating_sub(step);
+            }
+            UserEvent::Cancel | UserEvent::Close | UserEvent::Config => {
+                self.tx.send(AppEvent::CloseConfig);
+            }
+            // `o` opens the user's `~/.config/git_tui/config.toml` in
+            // `$EDITOR`. When the editor exits, the app reloads its
+            // config so the change is live immediately. Re-uses
+            // UserEvent::Checkout (the `o` key in the default keymap)
+            // since Checkout has no other meaning inside this view.
+            UserEvent::Checkout => {
+                self.tx.send(AppEvent::OpenConfigFile);
+            }
+            UserEvent::PageDown => {
+                for _ in 0..count {
+                    if self.selected + 1 < CONFIG_ITEM_COUNT {
+                        self.selected += 1;
+                    }
+                }
+                while self.selected + 1 < CONFIG_ITEM_COUNT && self.is_item_grayed(self.selected) {
+                    self.selected += 1;
+                }
+                if self.is_item_grayed(self.selected) {
+                    while self.selected > 0 && self.is_item_grayed(self.selected) {
+                        self.selected -= 1;
+                    }
+                }
+            }
+            UserEvent::PageUp => {
+                for _ in 0..count {
+                    if self.selected > 0 {
+                        self.selected -= 1;
+                    }
+                }
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
+                    self.selected -= 1;
+                }
+            }
+            UserEvent::GoToTop => {
+                self.selected = 0;
+            }
+            UserEvent::GoToBottom => {
+                self.selected = CONFIG_ITEM_COUNT - 1;
+                while self.selected > 0 && self.is_item_grayed(self.selected) {
+                    self.selected -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn start_text_edit(&mut self) {
+        let current_value = match self.selected {
+            12 => self.core_config.user_name().unwrap_or("").to_string(),
+            13 => self.core_config.user_email().unwrap_or("").to_string(),
+            14 => self.core_config.default_branch().unwrap_or("").to_string(),
+            _ => return,
+        };
+        self.editing_text = true;
+        self.editing_cursor = current_value.len();
+        self.editing_value = current_value;
+    }
+
+    fn handle_github_auth(&mut self) {
+        if self.github_auth_pending {
+            self.copy_and_open_pending_github_device();
+            return;
+        }
+
+        if self.github_auth_state.is_authenticated() {
+            match github_auth::clear_state() {
+                Ok(()) => {
+                    self.pending_github_device = None;
+                    self.github_auth_state = GithubAuthState {
+                        token: None,
+                        login: None,
+                        message: None,
+                    };
+                    self.tx
+                        .send(AppEvent::NotifySuccess("Logged out successfully".into()));
+                }
+                Err(e) => {
+                    self.github_auth_state.message = Some(e.clone());
+                    self.tx.send(AppEvent::NotifyError(e));
+                }
+            }
+            return;
+        }
+
+        match github_auth::request_device_code() {
+            Ok(device) => {
+                self.github_auth_pending = true;
+                self.pending_github_device = Some(PendingGithubDevice {
+                    user_code: device.user_code.clone(),
+                    verification_uri: device.verification_uri.clone(),
+                });
+                self.github_auth_state.message = Some(format!(
+                    "Enter {} at {}",
+                    device.user_code, device.verification_uri
+                ));
+                self.copy_and_open_pending_github_device();
+                let tx = self.tx.clone();
+                thread::spawn(move || {
+                    let state = match github_auth::poll_for_token(&device) {
+                        Ok(state) => state,
+                        Err(e) => GithubAuthState {
+                            token: None,
+                            login: None,
+                            message: Some(e),
+                        },
+                    };
+                    tx.send(AppEvent::GithubAuthFinished(state));
+                });
+            }
+            Err(e) => {
+                self.github_auth_state.message = Some(e.clone());
+                self.tx.send(AppEvent::NotifyError(e));
+            }
+        }
+    }
+
+    fn copy_and_open_pending_github_device(&self) {
+        if let Some(device) = &self.pending_github_device {
+            self.tx.send(AppEvent::CopyRawToClipboard {
+                value: device.user_code.clone(),
+                success_message: format!("{} copied to your clipboard", device.user_code),
+            });
+            self.tx
+                .send(AppEvent::OpenUrl(device.verification_uri.clone()));
+        }
+    }
+
+    pub fn finish_github_auth(&mut self, state: GithubAuthState) {
+        self.github_auth_pending = false;
+        self.pending_github_device = None;
+        let authenticated = state.is_authenticated();
+        let login = state.login.clone();
+        let message = state.message.clone();
+        self.github_auth_state = state;
+        if authenticated {
+            self.tx.send(AppEvent::NotifySuccess(format!(
+                "GitHub auth connected as {}",
+                login.unwrap_or_else(|| "unknown".into())
+            )));
+        } else if let Some(message) = message {
+            self.tx.send(AppEvent::NotifyError(message));
+        }
+    }
+
+    fn handle_text_edit_event(&mut self, event_with_count: UserEventWithCount, key: KeyEvent) {
+        use ratatui::crossterm::event::KeyCode;
+        let event = event_with_count.event;
+        match event {
+            UserEvent::Confirm => {
+                self.finish_text_edit();
+                return;
+            }
+            UserEvent::Cancel => {
+                self.cancel_text_edit();
+                return;
+            }
+            _ => {}
+        }
+        use ratatui::crossterm::event::KeyModifiers;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            // Word-jump delete-left, Ctrl+H, Ctrl+W, Ctrl+Backspace all
+            // mean "wipe the previous word" in most modern editors.
+            KeyCode::Char('h') | KeyCode::Char('w') if ctrl => {
+                self.editor_delete_word_left();
+            }
+            KeyCode::Backspace if ctrl => {
+                self.editor_delete_word_left();
+            }
+            KeyCode::Char(c) if !ctrl => {
+                // Numeric-only fields filter at the keystroke level so
+                // the user never sees an invalid character land in the
+                // buffer. No digit-restricted fields remain.
+                self.editing_value.insert(self.editing_cursor, c);
+                self.editing_cursor += c.len_utf8();
+            }
+            KeyCode::Backspace if self.editing_cursor > 0 => {
+                let start = prev_char_boundary(&self.editing_value, self.editing_cursor);
+                self.editing_value.drain(start..self.editing_cursor);
+                self.editing_cursor = start;
+            }
+            KeyCode::Delete if ctrl => {
+                self.editor_delete_word_right();
+            }
+            KeyCode::Delete if self.editing_cursor < self.editing_value.len() => {
+                let end = next_char_boundary(&self.editing_value, self.editing_cursor);
+                self.editing_value.drain(self.editing_cursor..end);
+            }
+            KeyCode::Left if ctrl => {
+                self.editing_cursor = editor_word_left(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Left if self.editing_cursor > 0 => {
+                self.editing_cursor = prev_char_boundary(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Right if ctrl => {
+                self.editing_cursor = editor_word_right(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Right if self.editing_cursor < self.editing_value.len() => {
+                self.editing_cursor = next_char_boundary(&self.editing_value, self.editing_cursor);
+            }
+            KeyCode::Home => {
+                self.editing_cursor = 0;
+            }
+            KeyCode::End => {
+                self.editing_cursor = self.editing_value.len();
+            }
+            _ => {}
+        }
+    }
+
+    fn editor_delete_word_left(&mut self) {
+        let new_pos = editor_word_left(&self.editing_value, self.editing_cursor);
+        self.editing_value.drain(new_pos..self.editing_cursor);
+        self.editing_cursor = new_pos;
+    }
+
+    fn editor_delete_word_right(&mut self) {
+        let new_pos = editor_word_right(&self.editing_value, self.editing_cursor);
+        self.editing_value.drain(self.editing_cursor..new_pos);
+    }
+
+    fn finish_text_edit(&mut self) {
+        self.editing_text = false;
+        let value = if self.editing_value.trim().is_empty() {
+            None
+        } else {
+            Some(self.editing_value.clone())
+        };
+        match self.selected {
+            12 => self.core_config.set_user_name(value),
+            13 => self.core_config.set_user_email(value),
+            14 => self.core_config.set_default_branch(value),
+            _ => {}
+        }
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
+            self.tx.send(AppEvent::NotifyError(e.to_string()));
+        }
+    }
+
+    fn cancel_text_edit(&mut self) {
+        self.editing_text = false;
+    }
+
+    fn cycle_option_prev(&mut self) {
+        match self.selected {
+            RENDERER_INDEX => {
+                let prev = match self.core_config.graph_renderer() {
+                    GraphRenderer::Auto => GraphRenderer::Sixel,
+                    GraphRenderer::Ascii => GraphRenderer::Auto,
+                    GraphRenderer::Kitty => GraphRenderer::Ascii,
+                    GraphRenderer::Iterm => GraphRenderer::Kitty,
+                    GraphRenderer::KittyUnicode => GraphRenderer::Iterm,
+                    GraphRenderer::Sixel => GraphRenderer::KittyUnicode,
+                };
+                self.core_config.set_graph_renderer(prev);
+                self.graph_preview = None;
+                if self.core_config.graph_renderer().is_ascii() {
+                    if self.core_config.graph_style() == GraphStyle::Smooth {
+                        self.core_config.set_graph_style(GraphStyle::Rounded);
+                    }
+                    self.core_config.set_github_avatars(false);
+                }
+            }
+            GRAPH_ENABLED_INDEX => {
+                self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
+            }
+            GRAPH_STYLE_INDEX => {
+                let current = self.core_config.graph_style();
+                let text_mode = self.core_config.graph_renderer().is_ascii();
+                let prev = if text_mode {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        GraphStyle::Smooth => GraphStyle::Angular,
+                    }
+                } else {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Smooth,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        GraphStyle::Smooth => GraphStyle::Angular,
+                    }
+                };
+                self.core_config.set_graph_style(prev);
+            }
+            GRAPH_WIDTH_INDEX => {
+                let prev = match self.core_config.graph_width() {
+                    GraphWidthType::Auto => GraphWidthType::Single,
+                    GraphWidthType::Double => GraphWidthType::Auto,
+                    GraphWidthType::Single => GraphWidthType::Double,
+                };
+                self.core_config.set_graph_width(prev);
+                // Drop the cached preview so the next render rebuilds at
+                // the new cell width.
+                self.graph_preview = None;
+            }
+            4 => {
+                // Diff Mode (was index 4, now 5 after Graph Render insert)
+                let prev = match self.ui_config.common.diff_mode {
+                    DiffMode::Enhanced => DiffMode::SideBySideEnhanced,
+                    DiffMode::Raw => DiffMode::Enhanced,
+                    DiffMode::SideBySide => DiffMode::Raw,
+                    DiffMode::SideBySideEnhanced => DiffMode::SideBySide,
+                };
+                self.ui_config.common.set_diff_mode(prev);
+            }
+            5 => {
+                // Resolve Mode (was index 5, now 6)
+                let prev = match self.ui_config.common.conflict_view {
+                    ConflictViewMode::ThreePane => ConflictViewMode::Inline,
+                    ConflictViewMode::TwoPane => ConflictViewMode::ThreePane,
+                    ConflictViewMode::Inline => ConflictViewMode::TwoPane,
+                };
+                self.ui_config.common.set_conflict_view(prev);
+            }
+            6 => {
+                // Rebase Mode (was index 6, now 7)
+                let prev = match self.ui_config.common.rebase_view {
+                    RebaseViewMode::Compact => RebaseViewMode::Split,
+                    RebaseViewMode::Inline => RebaseViewMode::Compact,
+                    RebaseViewMode::Split => RebaseViewMode::Inline,
+                };
+                self.ui_config.common.set_rebase_view(prev);
+            }
+            7 => {
+                // Order (was index 7, now 8)
+                let prev = match self.core_config.order() {
+                    crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
+                    crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
+                };
+                self.core_config.set_order(prev);
+            }
+            8 => {
+                // Initial Selection (was index 8, now 9)
+                let prev = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(prev);
+            }
+            MOUSE_INDEX => {
+                self.ui_config
+                    .common
+                    .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
+            }
+            SELECT_MODE_INDEX => {
+                let prev = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(prev);
+            }
+            DATE_FORMAT_INDEX => {
+                let prev = self.core_config.date_time_format().cycle_prev();
+                self.core_config.set_date_time_format(prev);
+            }
+            GITHUB_AVATARS_INDEX => {
+                self.core_config
+                    .set_github_avatars(!self.core_config.github_avatars());
+            }
+            _ => {}
+        }
+
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
+            self.tx.send(AppEvent::NotifyError(e.to_string()));
+        }
+    }
+
+    fn cycle_option(&mut self) {
+        match self.selected {
+            RENDERER_INDEX => {
+                let next = match self.core_config.graph_renderer() {
+                    GraphRenderer::Auto => GraphRenderer::Ascii,
+                    GraphRenderer::Ascii => GraphRenderer::Kitty,
+                    GraphRenderer::Kitty => GraphRenderer::Iterm,
+                    GraphRenderer::Iterm => GraphRenderer::KittyUnicode,
+                    GraphRenderer::KittyUnicode => GraphRenderer::Sixel,
+                    GraphRenderer::Sixel => GraphRenderer::Auto,
+                };
+                self.core_config.set_graph_renderer(next);
+                self.graph_preview = None;
+                if self.core_config.graph_renderer().is_ascii() {
+                    if self.core_config.graph_style() == GraphStyle::Smooth {
+                        self.core_config.set_graph_style(GraphStyle::Rounded);
+                    }
+                    self.core_config.set_github_avatars(false);
+                }
+            }
+            GRAPH_ENABLED_INDEX => {
+                self.ui_config.list.graph_enabled = !self.ui_config.list.graph_enabled;
+            }
+            GRAPH_STYLE_INDEX => {
+                let current = self.core_config.graph_style();
+                // In Ascii mode, Smooth is not available - skip it.
+                let text_mode = self.core_config.graph_renderer().is_ascii();
+                let next = if text_mode {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Rounded,
+                        // Shown as Rounded in text mode, so the next one is Angular.
+                        GraphStyle::Smooth => GraphStyle::Angular,
+                    }
+                } else {
+                    match current {
+                        GraphStyle::Rounded => GraphStyle::Angular,
+                        GraphStyle::Angular => GraphStyle::Smooth,
+                        GraphStyle::Smooth => GraphStyle::Rounded,
+                    }
+                };
+                self.core_config.set_graph_style(next);
+            }
+            GRAPH_WIDTH_INDEX => {
+                let next = match self.core_config.graph_width() {
+                    GraphWidthType::Auto => GraphWidthType::Double,
+                    GraphWidthType::Double => GraphWidthType::Single,
+                    GraphWidthType::Single => GraphWidthType::Auto,
+                };
+                self.core_config.set_graph_width(next);
+                self.graph_preview = None;
+            }
+            4 => {
+                // Diff Mode (was index 4, now 5 after Graph Render insert)
+                let next = match self.ui_config.common.diff_mode {
+                    DiffMode::Enhanced => DiffMode::Raw,
+                    DiffMode::Raw => DiffMode::SideBySide,
+                    DiffMode::SideBySide => DiffMode::SideBySideEnhanced,
+                    DiffMode::SideBySideEnhanced => DiffMode::Enhanced,
+                };
+                self.ui_config.common.set_diff_mode(next);
+            }
+            5 => {
+                // Resolve Mode (was index 5, now 6)
+                let next = match self.ui_config.common.conflict_view {
+                    ConflictViewMode::ThreePane => ConflictViewMode::TwoPane,
+                    ConflictViewMode::TwoPane => ConflictViewMode::Inline,
+                    ConflictViewMode::Inline => ConflictViewMode::ThreePane,
+                };
+                self.ui_config.common.set_conflict_view(next);
+            }
+            6 => {
+                // Rebase Mode (was index 6, now 7)
+                let next = match self.ui_config.common.rebase_view {
+                    RebaseViewMode::Compact => RebaseViewMode::Inline,
+                    RebaseViewMode::Inline => RebaseViewMode::Split,
+                    RebaseViewMode::Split => RebaseViewMode::Compact,
+                };
+                self.ui_config.common.set_rebase_view(next);
+            }
+            7 => {
+                // Order (was index 7, now 8)
+                let next = match self.core_config.order() {
+                    crate::CommitOrderType::Chrono => crate::CommitOrderType::Topo,
+                    crate::CommitOrderType::Topo => crate::CommitOrderType::Chrono,
+                };
+                self.core_config.set_order(next);
+            }
+            8 => {
+                // Initial Selection (was index 8, now 9)
+                let next = match self.core_config.initial_selection() {
+                    InitialSelection::Latest => InitialSelection::Head,
+                    InitialSelection::Head => InitialSelection::Latest,
+                };
+                self.core_config.set_initial_selection(next);
+            }
+            MOUSE_INDEX => {
+                self.ui_config
+                    .common
+                    .set_mouse_enabled(!self.ui_config.common.mouse_enabled);
+            }
+            SELECT_MODE_INDEX => {
+                let next = self.core_config.selection_mode().other();
+                self.core_config.set_selection_mode(next);
+            }
+            DATE_FORMAT_INDEX => {
+                let next = self.core_config.date_time_format().cycle_next();
+                self.core_config.set_date_time_format(next);
+            }
+            GITHUB_AVATARS_INDEX => {
+                self.core_config
+                    .set_github_avatars(!self.core_config.github_avatars());
+            }
+            _ => {}
+        }
+
+        if let Err(e) = save(&self.core_config, &self.ui_config) {
+            self.tx.send(AppEvent::NotifyError(e.to_string()));
+        }
+    }
+
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        let block = Block::default().padding(Padding::new(2, 2, 1, 1));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let title = Line::from(vec![
+            Span::styled(
+                "Configuration",
+                Style::default()
+                    .fg(self.ctx.color_theme.list_ref_stash_fg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  Settings & preferences",
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            ),
+        ]);
+        let title_area = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: 1,
+        };
+        // One row shared with the version on the right: the title ends with `…`.
+        let meta_w = crate::text_fit::width(&format!(
+            "v{} · {}",
+            env!("CARGO_PKG_VERSION"),
+            "local"
+        ));
+        let title = Line::from(crate::text_fit::ellipsize_spans(
+            title.spans,
+            (inner.width as usize).saturating_sub(meta_w + 2),
+        ));
+        f.render_widget(Paragraph::new(title), title_area);
+
+        // Top-right meta, `vX.Y.Z · <install>`. Kept discreet
+        // (divider_fg) so it reads like a chrome label, not a
+        // primary action. Right-aligned via Paragraph::alignment.
+        let meta = format!(
+            "v{} · {}",
+            env!("CARGO_PKG_VERSION"),
+            "local"
+        );
+        let meta_line = Line::from(Span::styled(
+            meta,
+            Style::default().fg(self.ctx.color_theme.divider_fg),
+        ));
+        f.render_widget(
+            Paragraph::new(meta_line).alignment(Alignment::Right),
+            title_area,
+        );
+
+        // Separator line
+        let sep_area = Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: 1,
+        };
+        let sep_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+        let sep_line = Line::from("╌".repeat(inner.width as usize)).style(sep_style);
+        f.render_widget(Paragraph::new(sep_line), sep_area);
+
+        // Split remaining area into two columns
+        let content_area = Rect {
+            x: inner.x,
+            y: inner.y + 3,
+            width: inner.width,
+            height: inner.height.saturating_sub(4),
+        };
+        let left_width = self.config_left_width(content_area.width);
+        let separator_area = Rect {
+            x: content_area.x + left_width,
+            y: content_area.y,
+            width: 1,
+            height: content_area.height,
+        };
+        let left_area = Rect {
+            x: content_area.x,
+            y: content_area.y,
+            width: left_width.saturating_sub(1),
+            height: content_area.height,
+        };
+        let right_area = Rect {
+            x: separator_area.x + 2,
+            y: content_area.y,
+            width: content_area.right().saturating_sub(separator_area.x + 2),
+            height: content_area.height,
+        };
+        self.left_area = left_area;
+        self.render_vertical_separator(f, separator_area);
+
+        // Items list (left column), index order MUST stay in sync with the
+        // constants block at the top of the file (TEXT_EDIT_START_INDEX,
+        // GITHUB_AUTH_INDEX, GITHUB_AVATARS_INDEX) and the `match self.selected`
+        // arms in `cycle_option`/`cycle_option_prev`/`start_text_edit`/
+        // `finish_text_edit`. Inserting a new item between existing ones
+        // requires shifting indices in all of those places too.
+        let items = vec![
+            (
+                "Renderer",
+                graph_renderer_display(self.core_config.graph_renderer()),
+                false,
+            ),
+            (
+                "Graph Enabled",
+                if self.ui_config.list.graph_enabled {
+                    "yes".to_string()
+                } else {
+                    "no".to_string()
+                },
+                false,
+            ),
+            (
+                "Graph Style",
+                // Smooth needs images: in a text-only terminal the graph is drawn
+                // as Rounded, so that is what the list shows.
+                graph_style_display(
+                    if self.core_config.graph_renderer().is_ascii()
+                        && self.core_config.graph_style() == GraphStyle::Smooth
+                    {
+                        GraphStyle::Rounded
+                    } else {
+                        self.core_config.graph_style()
+                    },
+                ),
+                false,
+            ),
+            (
+                "Graph Width",
+                graph_width_display(self.core_config.graph_width()),
+                false,
+            ),
+            (
+                "Diff Mode",
+                diff_mode_display(self.ui_config.common.diff_mode),
+                false,
+            ),
+            (
+                "Resolve Mode",
+                conflict_view_display(self.ui_config.common.conflict_view),
+                false,
+            ),
+            (
+                "Rebase Mode",
+                rebase_view_display(self.ui_config.common.rebase_view),
+                false,
+            ),
+            (
+                "Order",
+                commit_order_display(self.core_config.order()),
+                false,
+            ),
+            (
+                "Initial Select",
+                initial_selection_display(self.core_config.initial_selection()),
+                false,
+            ),
+            (
+                "Mouse",
+                mouse_display(self.ui_config.common.mouse_enabled),
+                false,
+            ),
+            (
+                "Select Mode",
+                selection_mode_display(self.core_config.selection_mode()),
+                false,
+            ),
+            (
+                "Date Format",
+                self.core_config
+                    .date_time_format()
+                    .display_name()
+                    .to_string(),
+                false,
+            ),
+            (
+                "Git Name",
+                self.core_config
+                    .user_name()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "(from git)".into()),
+                false,
+            ),
+            (
+                "Git Email",
+                self.core_config
+                    .user_email()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "(from git)".into()),
+                false,
+            ),
+            (
+                "Default Branch",
+                self.core_config
+                    .default_branch()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "(from git)".into()),
+                false,
+            ),
+            (
+                "GitHub Auth",
+                github_auth_display(&self.github_auth_state, self.github_auth_pending),
+                false,
+            ),
+            (
+                "Github Avatars",
+                if self.core_config.github_avatars() {
+                    "enabled".to_string()
+                } else {
+                    "disabled".to_string()
+                },
+                true,
+            ),
+        ];
+
+        let avatars_selectable = self.github_avatars_selectable();
+        let dim_fg = self.ctx.color_theme.divider_fg;
+        let mut lines: Vec<Line> = vec![config_section_line("Interface", &self.ctx.color_theme)];
+        let mut item_rows: Vec<Option<usize>> = vec![None];
+        for (i, (name, value, indented)) in items.iter().enumerate() {
+            if i == TEXT_EDIT_START_INDEX {
+                lines.push(Line::from(""));
+                item_rows.push(None);
+                lines.push(config_section_line("Git", &self.ctx.color_theme));
+                item_rows.push(None);
+            } else if i == GITHUB_AUTH_INDEX {
+                lines.push(Line::from(""));
+                item_rows.push(None);
+                lines.push(config_section_line("GitHub", &self.ctx.color_theme));
+                item_rows.push(None);
+            }
+
+            let display = config_value_display(
+                i,
+                value,
+                self.editing_text && i == self.selected,
+                &self.editing_value,
+            );
+            let is_grayed = self.is_item_grayed(i) || (*indented && !avatars_selectable);
+            let label = format!("{CONFIG_ITEM_INDENT}{name}");
+            let value_prefix = "";
+            let label_fg = if is_grayed {
+                dim_fg
+            } else {
+                self.ctx.color_theme.fg
+            };
+            let value_fg = if is_grayed {
+                dim_fg
+            } else if i == GITHUB_AUTH_INDEX {
+                // GitHub Auth state drives its own color so the button
+                // reads as "ok / neutral / busy" rather than always
+                // warn-yellow: green when signed in, plain fg when the
+                // user still needs to authenticate, warn while pending.
+                if self.github_auth_pending {
+                    self.ctx.color_theme.status_warn_fg
+                } else if self.github_auth_state.is_authenticated() {
+                    self.ctx.color_theme.status_success_fg
+                } else {
+                    self.ctx.color_theme.fg
+                }
+            } else {
+                config_value_fg(config_value_kind(i), &self.ctx.color_theme)
+            };
+            let value_style = if self.editing_text && i == self.selected {
+                Style::default()
+                    .fg(self.ctx.color_theme.fg)
+                    .bg(self.ctx.color_theme.list_selected_bg)
+            } else if config_value_kind(i) == ConfigValueKind::Input && !is_grayed {
+                // Use the same fg that the commit list uses for messages
+                // it's the theme's "default-readable on any background"
+                // token. Earlier this used `detail_label_fg`, which in
+                // Tokyo Night happens to equal `list_selected_bg`
+                // (#51597d ≈ #515c7e) and made placeholder values invisible.
+                Style::default()
+                    .fg(self.ctx.color_theme.list_commit_message_fg)
+                    .bg(self.ctx.color_theme.list_selected_bg)
+                    .add_modifier(config_value_modifier(i))
+            } else {
+                Style::default()
+                    .fg(value_fg)
+                    .add_modifier(config_value_modifier(i))
+            };
+            let spans = vec![
+                Span::styled(format!("{:<18}", label), Style::default().fg(label_fg)),
+                Span::styled(format!("{value_prefix}{display}"), value_style),
+            ];
+            // One row: a value too long for the column ends with `…` (the field
+            // being typed in keeps its text, the cursor is placed on it).
+            let spans = if self.editing_text && i == self.selected {
+                spans
+            } else {
+                crate::text_fit::ellipsize_spans(spans, left_area.width as usize)
+            };
+            let mut line = Line::from(spans);
+            if i == self.selected && !is_grayed {
+                line = line.style(
+                    Style::default()
+                        .fg(self.ctx.color_theme.list_selected_fg)
+                        .bg(self.ctx.color_theme.list_selected_bg)
+                        .add_modifier(Modifier::BOLD),
+                );
+            }
+            lines.push(line);
+            item_rows.push(Some(i));
+        }
+        self.left_item_rows = item_rows;
+
+        // Auto-scroll: if the currently-selected item's row index falls
+        // outside the viewport, slide `left_scroll` so it's visible. This
+        // is what makes ↑ / ↓ keep working past the bottom edge of the
+        // pane on small terminals.
+        //
+        // Edge anchoring: when the cursor reaches the very FIRST or
+        // LAST selectable item, snap the scroll all the way to that
+        // edge. Otherwise the section headers above (or trailing blank
+        // rows below) stay clipped, and the `…` marker reads as
+        // "there's more" when there isn't.
+        let viewport_h = left_area.height as usize;
+        let total_lines = lines.len();
+        // Snap viewport to keep `selected` visible, but ONLY when the
+        // selection actually changed since the last frame (arrow key,
+        // click on a row, etc.). The mouse wheel just nudges
+        // `left_scroll` directly; if we re-ran the snap every frame the
+        // wheel could never push the viewport past the focused row.
+        let selection_changed = self.last_rendered_selected != Some(self.selected);
+        if selection_changed {
+            if self.selected == 0 {
+                self.left_scroll = 0;
+            } else if (self.selected + 1..CONFIG_ITEM_COUNT).all(|i| self.is_item_grayed(i)) {
+                // Nothing selectable below (the last item can be grayed out):
+                // show the end of the list, grayed rows included.
+                self.left_scroll = total_lines.saturating_sub(viewport_h);
+            } else if let Some(sel_row) = self
+                .left_item_rows
+                .iter()
+                .position(|r| r == &Some(self.selected))
+            {
+                if viewport_h > 0 {
+                    // The first and last visible rows hold the `…` markers when
+                    // the list scrolls: keep the selection one row inside them.
+                    let margin = usize::from(total_lines > viewport_h && viewport_h > 2);
+                    if sel_row < self.left_scroll + margin {
+                        self.left_scroll = sel_row.saturating_sub(margin);
+                    } else if sel_row + margin >= self.left_scroll + viewport_h {
+                        self.left_scroll = sel_row + margin + 1 - viewport_h;
+                    }
+                }
+            }
+        }
+        self.last_rendered_selected = Some(self.selected);
+        // Always clamp scroll to in-range so a terminal resize can't
+        // leave the viewport pointing past the end of the content.
+        let max_scroll = total_lines.saturating_sub(viewport_h);
+        if self.left_scroll > max_scroll {
+            self.left_scroll = max_scroll;
+        }
+
+        let mut visible: Vec<Line> = lines
+            .into_iter()
+            .skip(self.left_scroll)
+            .take(viewport_h)
+            .collect();
+        // Top / bottom `…` markers signal more content past the viewport
+        //, same convention as the Help page.
+        if total_lines > viewport_h && !visible.is_empty() {
+            let dots_style = Style::default().fg(self.ctx.color_theme.divider_fg);
+            let dots = Line::from(Span::styled("  …", dots_style));
+            if self.left_scroll > 0 {
+                visible[0] = dots.clone();
+            }
+            if self.left_scroll + viewport_h < total_lines {
+                let last = visible.len() - 1;
+                visible[last] = dots;
+            }
+        }
+        let paragraph = Paragraph::new(visible);
+        f.render_widget(paragraph, left_area);
+
+        // Description / preview (right column)
+        let git_name = &self.ctx.git_user_name;
+        let git_email = &self.ctx.git_user_email;
+        let descriptions: Vec<String> = vec![
+            "How git-tui renders images.\n\nAuto: auto-detect the best image protocol for your terminal.\nAscii: no images - graph uses Unicode box-drawing, avatars are disabled.\nKitty: Kitty graphics protocol.\niTerm2: iTerm2 inline images.\nKitty Unicode: Kitty via Unicode placeholders (for tmux).\nSixel: Sixel graphics format.".into(),
+            {
+                let base = "Toggle the commit-graph image column.\n\nDisabling it skips all image rendering for near-instant scrolling on huge repos.";
+                if self.ctx.graph_huge_repo_warning {
+                    format!(
+                        "{}\n\n⚠ Huge repo detected: the graph is limited to the ~500 most recent commits. Past that, rows show colour bars only. Re-enabling may cause lag on very dense histories.",
+                        base
+                    )
+                } else {
+                    base.into()
+                }
+            },
+            "Controls how commit connection lines are rendered in the graph.\n\nSmooth is only available in Image render mode.".into(),
+            "Cell width used by each graph row image.\n\nAuto picks Double when the graph fits that wide in the terminal, and Single otherwise.".into(),
+            diff_mode_description(self.ui_config.common.diff_mode),
+            conflict_view_description(self.ui_config.common.conflict_view),
+            rebase_view_description(self.ui_config.common.rebase_view),
+            "How commits are ordered in the list.\n\nChrono shows commits in date order (newest first). Topo (topological) walks parents before children, branches stay grouped, like `git log --topo-order`.".into(),
+            "Which commit is focused when git-tui starts.\n\nLatest selects the newest commit at the top of the list. HEAD selects whatever commit HEAD points to.\n\nWill update at next launch of git-tui.".into(),
+            "Enable mouse support for clicking and scrolling.".into(),
+            "What Ctrl + drag selects and copies, in any view.\n\nClassic: everything under the drag, like a terminal does, frames and the panel next door included.\nSmart: only the text of the panel the drag started in, never its frame or the panels around it.\n\nA drag that does not start inside a framed panel selects like Classic. Needs the mouse On.".into(),
+            "Date and time display format for commits in the list and detail views.".into(),
+            format!(
+                "Override git user.name for commits.\n\nCurrent git config: '{}'",
+                git_name
+            ),
+            format!(
+                "Override git user.email for commits.\n\nCurrent git config: '{}'",
+                git_email
+            ),
+            format!(
+                "Override the branch name used by git-tui when initializing a new git repository.\n\nCurrent git config: '{}'",
+                self.ctx.git_default_branch
+            ),
+            github_auth_description(&self.github_auth_state, self.github_auth_pending),
+            github_avatars_description(&self.github_auth_state, self.core_config.github_avatars()),
+        ];
+
+        let selected_name = items
+            .get(self.selected)
+            .map(|(name, _, _)| *name)
+            .unwrap_or("Description");
+        let mut right_lines: Vec<Line> = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Details",
+                    Style::default()
+                        .fg(self.ctx.color_theme.list_ref_stash_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  / {selected_name}"),
+                    Style::default().fg(self.ctx.color_theme.divider_fg),
+                ),
+            ]),
+            Line::from(""),
+        ];
+        for line in descriptions[self.selected].lines() {
+            let style = if line.contains("Might cause") || line.starts_with("⚠") {
+                Style::default().fg(self.ctx.color_theme.status_warn_fg)
+            } else if line.starts_with("Current git config") {
+                Style::default().fg(self.ctx.color_theme.status_success_fg)
+            } else {
+                Style::default().fg(self.ctx.color_theme.fg)
+            };
+            right_lines.push(Line::from(Span::styled(line.to_string(), style)));
+        }
+
+        match self.selected {
+            GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX => {
+                right_lines.push(Line::from(""));
+                right_lines.push(Line::from(vec![Span::styled(
+                    "Preview",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                right_lines.push(Line::from(""));
+                // Reserve 5 blank lines under "Preview" (3 image rows + 2 vertical
+                // padding rows). Image cells will be written directly to the buffer
+                // after the paragraph is rendered.
+                for _ in 0..5 {
+                    right_lines.push(Line::from(""));
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(resolved) = self.auto_resolved_hint() {
+            let hint_fg = self.ctx.color_theme.list_date_fg;
+            right_lines.push(Line::from(""));
+            right_lines.push(Line::from(Span::styled(
+                format!("Auto resolved: {resolved}"),
+                Style::default().fg(hint_fg),
+            )));
+        }
+
+        // When the change takes effect: the user can tell which settings they
+        // can try out right here.
+        if let Some(when) = ROW_APPLIES.get(self.selected) {
+            right_lines.push(Line::from(""));
+            right_lines.push(Line::from(Span::styled(
+                apply_note(*when),
+                Style::default().fg(self.ctx.color_theme.divider_fg),
+            )));
+        }
+
+        // Leaving the Graph Style / Graph Width items, pre-clear the cells
+        // that previously held the preview so labels/image-trailing-spaces
+        // are overwritten with plain spaces. Paragraph rendering will then
+        // write the new content (e.g. the theme code preview) over those
+        // spaces. Kitty persistent placements are evicted via the post-draw
+        // `pending_preview_deletes` queue.
+        let preview_active = matches!(self.selected, GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX);
+        if !preview_active {
+            if let Some((y, count)) = self.last_preview_rows.take() {
+                self.clear_preview_cells(f, right_area, y, count);
+                for i in 0..count {
+                    self.pending_preview_deletes.push(y + i);
+                }
+            }
+        }
+
+        // Soft-wrap so long description lines don't clip at the right
+        // edge of the pane. `trim: false` keeps explicit `\n` breaks in
+        // the source intact instead of collapsing whitespace.
+        let right_paragraph = Paragraph::new(right_lines).wrap(Wrap { trim: false });
+        f.render_widget(right_paragraph, right_area);
+
+        if preview_active {
+            self.render_graph_style_preview(f, right_area);
+        }
+
+        if self.editing_text
+            && config_value_kind(self.selected) == ConfigValueKind::Input
+            && self.selected != GITHUB_AUTH_INDEX
+            && self.selected != GITHUB_AVATARS_INDEX
+        {
+            // Cursor x = label column (18) + visual width of the substring
+            // up to the editing cursor. `measure_text_width` handles
+            // multi-cell glyphs correctly; for ASCII (Load Count digits,
+            // Git Name/Email) it's just the byte count.
+            let prefix = &self.editing_value[..self.editing_cursor.min(self.editing_value.len())];
+            let cursor_x = left_area.x + 18 + console::measure_text_width(prefix) as u16;
+            // Subtract `left_scroll`, the viewport shows lines starting
+            // at `left_scroll`, so a line at original index `row` appears
+            // at screen row `row - left_scroll`. Without this, scrolling
+            // made the cursor land one line below its visible row (or
+            // off-screen on big scrolls).
+            let cursor_y = self
+                .left_item_rows
+                .iter()
+                .position(|idx| *idx == Some(self.selected))
+                .map(|row| left_area.y + (row.saturating_sub(self.left_scroll)) as u16)
+                .unwrap_or(left_area.y);
+            f.set_cursor_position((cursor_x, cursor_y));
+        }
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16) {
+        let hit = self.left_area_item_index(col, row);
+        // Clicking outside the row currently being edited just **closes
+        // the editor**, and stops there. We don't also cycle / open the
+        // clicked field's edit in the same gesture, otherwise an
+        // accidental click on a Cycle row would silently mutate config.
+        // The next click selects + acts as usual. Resetting
+        // `last_mouse_pos` re-arms hover: the very next move event won't
+        // be filtered as "synthetic", so the highlight follows the
+        // cursor again immediately.
+        if self.editing_text && hit != Some(self.selected) {
+            self.cancel_text_edit();
+            self.last_mouse_pos = None;
+            return;
+        }
+        let Some(item_idx) = hit else { return };
+        if item_idx < CONFIG_ITEM_COUNT {
+            // Grayed rows swallow the click entirely: no selection change,
+            // no action. Mirrors the hover behaviour in
+            // `handle_mouse_move`, so a click on a dead row never leaves
+            // the cursor parked there.
+            if self.is_item_grayed(item_idx) {
+                return;
+            }
+            self.selected = item_idx;
+            if self.selected == GITHUB_AUTH_INDEX {
+                self.handle_github_auth();
+            } else if self.selected == GITHUB_AVATARS_INDEX {
+                self.cycle_option();
+            } else if config_value_kind(self.selected) == ConfigValueKind::Input {
+                self.start_text_edit();
+            } else {
+                self.cycle_option();
+            }
+        }
+    }
+
+    pub fn handle_mouse_move(&mut self, col: u16, row: u16) {
+        // Filter out synthetic post-scroll moves: when the wheel ticks,
+        // the cursor stays at the same physical cell but the content
+        // under it changed because the viewport scrolled. Many terminals
+        // (Ghostty, recent Kitty) emit a Moved event at the unchanged
+        // position right after, if we acted on it we'd snap selection
+        // to whatever item just slid under the cursor, dragging the
+        // selection along with the scroll. Same (col, row) as last time
+        // = real cursor didn't move = nothing to do.
+        if self.last_mouse_pos == Some((col, row)) {
+            return;
+        }
+        self.last_mouse_pos = Some((col, row));
+        if self.editing_text {
+            return;
+        }
+        if let Some(idx) = self.left_area_item_index(col, row) {
+            if idx < CONFIG_ITEM_COUNT && !self.is_item_grayed(idx) {
+                self.selected = idx;
+            }
+        }
+    }
+
+    fn left_area_item_index(&self, col: u16, row: u16) -> Option<usize> {
+        if col < self.left_area.x || col >= self.left_area.x.saturating_add(self.left_area.width) {
+            return None;
+        }
+        if row < self.left_area.y || row >= self.left_area.y.saturating_add(self.left_area.height) {
+            return None;
+        }
+        // `left_item_rows` is the FULL line list (headers / blanks / config
+        // rows), not the visible viewport. After scroll, screen row 0 maps
+        // to logical row `left_scroll`, so add it before indexing, without
+        // it hover lands on the wrong row by `left_scroll` lines.
+        let row_idx = (row - self.left_area.y) as usize + self.left_scroll;
+        self.left_item_rows.get(row_idx).and_then(|idx| *idx)
+    }
+
+    fn ensure_graph_preview(&mut self) {
+        let renderer = self.core_config.graph_renderer();
+        if renderer.is_ascii() {
+            return;
+        }
+        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
+        let preview_protocol = renderer.to_image_protocol();
+        let cell_width = match self.core_config.graph_width() {
+            GraphWidthType::Double => crate::graph::CellWidthType::Double,
+            GraphWidthType::Single => crate::graph::CellWidthType::Single,
+            GraphWidthType::Auto => self.auto_cell_width(),
+        };
+        let needs_rebuild = self
+            .graph_preview
+            .as_ref()
+            .map(|p| p.style != style || p.cell_width != cell_width)
+            .unwrap_or(true);
+        if needs_rebuild {
+            let bg_rgb = if let ratatui::style::Color::Rgb(r, g, b) = self.ctx.color_theme.bg {
+                Some((r, g, b))
+            } else {
+                None
+            };
+            let mut preview = GraphPreview::build_with_cell_width(
+                style,
+                cell_width,
+                &self.ctx.graph_color_set,
+                preview_protocol,
+                bg_rgb,
+            );
+            self.pending_preview_uploads
+                .append(&mut preview.pending_uploads);
+            self.cumulative_preview_image_ids
+                .extend(preview.image_ids.iter().copied());
+            self.graph_preview = Some(preview);
+        }
+    }
+
+    fn render_graph_style_preview(&mut self, f: &mut Frame, right_area: Rect) {
+        let renderer = self.core_config.graph_renderer();
+        let style: crate::graph::GraphStyle = Some(self.core_config.graph_style()).into();
+
+        if renderer.is_ascii() {
+            self.render_ascii_graph_preview(f, right_area, style);
+            return;
+        }
+
+        self.ensure_graph_preview();
+
+        let preview = match &self.graph_preview {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Image rows live just below the "Preview" header/blank within right_area.
+        // Layout: 0=Details header, 1=blank, 2=description (1 line), 3=blank,
+        //         4="Preview", 5=blank, 6..8=image rows (3 commits).
+        let preview_top = right_area.y.saturating_add(6);
+        // Labels: "main" matches the lane-0 branch color, "feature" the lane-1
+        // branch color. Third row (fork commit) intentionally has no label.
+        let main_color = self.ctx.graph_color_set.get(0).to_ratatui_color();
+        let feature_color = self.ctx.graph_color_set.get(1).to_ratatui_color();
+        let labels: [&str; 3] = ["main", "feature", ""];
+        let label_styles = [
+            Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(feature_color)
+                .add_modifier(Modifier::BOLD),
+            Style::default(),
+        ];
+
+        let buf = f.buffer_mut();
+        let max_image_cells = right_area.width as usize;
+        let mut max_used_cells = 0usize;
+        // Wipe each preview row end-to-end before drawing image + label so a
+        // wider previous frame (e.g. Double → Single) can't leave leftover
+        // label characters past the new label's right edge. Paragraph
+        // rendering only writes cells that contain glyphs, not the trailing
+        // ones, without this clear, switching cell widths produced ghost
+        // text like "ie" hanging next to the new "main" label.
+        let bg_style = ratatui::style::Style::default().bg(self.ctx.color_theme.bg);
+        for i in 0..preview.rows.len() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            for col in right_area.x..right_area.x.saturating_add(right_area.width) {
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(" ");
+                buf_cell.set_style(bg_style);
+                buf_cell.set_skip(false);
+            }
+        }
+        for (i, image) in preview.rows.iter().enumerate() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let used = image.cells().len().min(max_image_cells);
+            if used > max_used_cells {
+                max_used_cells = used;
+            }
+            for (x, cell) in image.cells().iter().take(max_image_cells).enumerate() {
+                let col = right_area.x + x as u16;
+                if col >= right_area.x.saturating_add(right_area.width) {
+                    break;
+                }
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(cell.symbol());
+                buf_cell.set_style(cell.style().bg(self.ctx.color_theme.bg));
+                buf_cell.set_skip(cell.skip());
+            }
+        }
+
+        // Labels are written to the right of the widest image row, with a 2-cell gap.
+        let label_x = right_area.x + max_used_cells as u16 + 2;
+        for (i, label) in labels.iter().enumerate() {
+            if i >= preview.rows.len() {
+                break;
+            }
+            if label.is_empty() {
+                continue;
+            }
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let area = Rect {
+                x: label_x.min(right_area.x.saturating_add(right_area.width)),
+                y,
+                width: right_area
+                    .x
+                    .saturating_add(right_area.width)
+                    .saturating_sub(label_x),
+                height: 1,
+            };
+            if area.width == 0 {
+                continue;
+            }
+            let line = Line::from(Span::styled((*label).to_string(), label_styles[i]));
+            f.render_widget(Paragraph::new(line), area);
+        }
+
+        // Record where we drew the preview so we can delete the Kitty placements
+        // when the user navigates to a different config item.
+        self.last_preview_rows = Some((preview_top, preview.rows.len() as u16));
+    }
+
+    fn render_ascii_graph_preview(
+        &mut self,
+        f: &mut Frame,
+        right_area: Rect,
+        style: crate::graph::GraphStyle,
+    ) {
+        use crate::git::CommitType;
+        use crate::graph::ascii;
+
+        let preview_top = right_area.y.saturating_add(6);
+        let bg = self.ctx.color_theme.bg;
+        let bg_style = Style::default().bg(bg);
+        let edge_colors: Vec<Color> = self
+            .ctx
+            .graph_color_set
+            .colors
+            .iter()
+            .map(|c| c.to_ratatui_color())
+            .collect();
+
+        let lane_width: usize = match self.core_config.graph_width() {
+            GraphWidthType::Double => 3,
+            GraphWidthType::Single => 2,
+            GraphWidthType::Auto => match self.auto_cell_width() {
+                crate::graph::CellWidthType::Double => 3,
+                crate::graph::CellWidthType::Single => 2,
+            },
+        };
+
+        let hashes = ["m1", "f1", "m0"];
+        let types = [CommitType::Commit, CommitType::Commit, CommitType::Commit];
+        let labels = ["main", "feature", ""];
+        let main_color = self.ctx.graph_color_set.get(0).to_ratatui_color();
+        let feature_color = self.ctx.graph_color_set.get(1).to_ratatui_color();
+        let label_styles = [
+            Style::default().fg(main_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(feature_color)
+                .add_modifier(Modifier::BOLD),
+            Style::default(),
+        ];
+
+        let ap = GraphPreview::build_ascii(style, &self.ctx.graph_color_set);
+        let graph = ap.graph;
+
+        let buf = f.buffer_mut();
+        let mut max_used = 0usize;
+        for (i, hash) in hashes.iter().enumerate() {
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            for col in right_area.x..right_area.x.saturating_add(right_area.width) {
+                let c = &mut buf[(col, y)];
+                c.set_symbol(" ");
+                c.set_style(bg_style);
+                c.set_skip(false);
+            }
+            let ch: crate::git::CommitHash = (*hash).into();
+            let cells = ascii::render_ascii_row(
+                &graph,
+                &ch,
+                &types[i],
+                false,
+                style,
+                &edge_colors,
+                crate::run_style::role_dim(),
+                None,
+                lane_width,
+            );
+            if cells.len() > max_used {
+                max_used = cells.len();
+            }
+            for (x, ac) in cells.iter().enumerate() {
+                let col = right_area.x + x as u16;
+                if col >= right_area.x.saturating_add(right_area.width) {
+                    break;
+                }
+                let c = &mut buf[(col, y)];
+                c.set_symbol(&String::from(ac.ch));
+                c.set_style(Style::default().fg(ac.color).bg(bg));
+                c.set_skip(false);
+            }
+        }
+
+        let label_x = right_area.x + max_used as u16 + 2;
+        for (i, label) in labels.iter().enumerate() {
+            if label.is_empty() {
+                continue;
+            }
+            let y = preview_top + i as u16;
+            if y >= right_area.y.saturating_add(right_area.height) {
+                break;
+            }
+            let area = Rect {
+                x: label_x,
+                y,
+                width: right_area
+                    .x
+                    .saturating_add(right_area.width)
+                    .saturating_sub(label_x),
+                height: 1,
+            };
+            if area.width == 0 {
+                continue;
+            }
+            let line = Line::from(Span::styled(label.to_string(), label_styles[i]));
+            f.render_widget(Paragraph::new(line), area);
+        }
+
+        self.last_preview_rows = Some((preview_top, 3));
+    }
+
+    fn clear_preview_cells(&self, f: &mut Frame, right_area: Rect, y_start: u16, count: u16) {
+        // We only need to overwrite the previous frame's text-bearing cells (image
+        // placeholders and labels) with a regular space so the buffer diff sends an
+        // update. We deliberately avoid embedding the protocol's clear-cell escape
+        // here, because for Kitty proper that escape is a long string whose unicode
+        // width pushes ratatui's `to_skip` counter past the trailing cells, causing
+        // their updates to be dropped. Kitty graphics layers are removed via the
+        // post-draw `delete_row` calls in `pending_preview_deletes`.
+        let buf = f.buffer_mut();
+        let right_end = right_area.x.saturating_add(right_area.width);
+        let bottom = right_area.y.saturating_add(right_area.height);
+        let bg_style = Style::default()
+            .fg(self.ctx.color_theme.fg)
+            .bg(self.ctx.color_theme.bg);
+        for i in 0..count {
+            let y = y_start + i;
+            if y >= bottom {
+                break;
+            }
+            for col in right_area.x..right_end {
+                let buf_cell = &mut buf[(col, y)];
+                buf_cell.set_symbol(" ");
+                buf_cell.set_style(bg_style);
+                buf_cell.set_skip(false);
+            }
+        }
+    }
+
+    pub fn prepare_graph_uploads(&mut self) {
+        if matches!(self.selected, GRAPH_STYLE_INDEX | GRAPH_WIDTH_INDEX) {
+            self.ensure_graph_preview();
+        }
+    }
+
+    pub fn drain_pending_graph_uploads(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_preview_uploads)
+    }
+
+    pub fn drain_pending_avatar_deletes(&mut self) -> Vec<u16> {
+        std::mem::take(&mut self.pending_preview_deletes)
+    }
+}
+
+impl<'a> ConfigView<'a> {
+    pub fn take_before_view(&mut self) -> View<'a> {
+        std::mem::take(&mut self.before)
+    }
+
+    pub fn update_color_theme(&mut self, theme: crate::color::ColorTheme) {
+        std::rc::Rc::make_mut(&mut self.ctx).color_theme = theme.clone();
+        // Drop the cached graph preview: it was rendered with the previous
+        // theme's bg/branch colours, and `render_graph_style_preview` only
+        // rebuilds when the graph *style* changes. Clearing forces a
+        // rebuild on the next render with the fresh `ctx.graph_color_set`
+        // (which app.rs has just refreshed via `build_graph_color_set`).
+        self.graph_preview = None;
+        self.before.update_color_theme(theme);
+    }
+
+    pub fn graph_image_ids_sorted(&self) -> Vec<u32> {
+        let mut ids = self.before.graph_image_ids_sorted();
+        ids.extend(self.cumulative_preview_image_ids.iter().copied());
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    pub fn is_search_active(&self) -> bool {
+        self.before.is_search_active()
+    }
+
+    pub fn is_search_querying(&self) -> bool {
+        self.before.is_search_querying()
+    }
+
+    pub fn search_case_fuzzy_regex(&self) -> Option<(bool, bool, bool)> {
+        self.before.search_case_fuzzy_regex()
+    }
+
+    pub fn core_config(&self) -> &CoreConfig {
+        &self.core_config
+    }
+
+    pub fn ui_config(&self) -> &UiConfig {
+        &self.ui_config
+    }
+
+    pub fn github_auth_state(&self) -> &GithubAuthState {
+        &self.github_auth_state
+    }
+
+    pub fn is_editing_text(&self) -> bool {
+        self.editing_text
+    }
+
+    pub fn footer_hint(&self) -> String {
+        config_footer_hint(
+            self.selected,
+            &self.github_auth_state,
+            self.github_auth_pending,
+        )
+    }
+}
+
+fn graph_renderer_display(renderer: GraphRenderer) -> String {
+    match renderer {
+        GraphRenderer::Auto => "Auto".to_string(),
+        GraphRenderer::Ascii => "Ascii".to_string(),
+        GraphRenderer::Kitty => "Kitty".to_string(),
+        GraphRenderer::Iterm => "iTerm2".to_string(),
+        GraphRenderer::KittyUnicode => "Kitty Unicode".to_string(),
+        GraphRenderer::Sixel => "Sixel".to_string(),
+    }
+}
+
+fn graph_style_display(style: GraphStyle) -> String {
+    match style {
+        GraphStyle::Rounded => "Rounded".to_string(),
+        GraphStyle::Angular => "Angular".to_string(),
+        GraphStyle::Smooth => "Smooth".to_string(),
+    }
+}
+
+fn graph_width_display(width: GraphWidthType) -> String {
+    match width {
+        GraphWidthType::Auto => "Auto".to_string(),
+        GraphWidthType::Double => "Double".to_string(),
+        GraphWidthType::Single => "Single".to_string(),
+    }
+}
+
+fn initial_selection_display(sel: InitialSelection) -> String {
+    match sel {
+        InitialSelection::Latest => "Latest".to_string(),
+        InitialSelection::Head => "HEAD".to_string(),
+    }
+}
+
+fn commit_order_display(order: crate::CommitOrderType) -> String {
+    match order {
+        crate::CommitOrderType::Chrono => "Chrono".to_string(),
+        crate::CommitOrderType::Topo => "Topo".to_string(),
+    }
+}
+
+fn diff_mode_display(mode: DiffMode) -> String {
+    match mode {
+        DiffMode::Enhanced => "Enhanced".to_string(),
+        DiffMode::Raw => "Raw".to_string(),
+        DiffMode::SideBySide => "Side by side".to_string(),
+        DiffMode::SideBySideEnhanced => "Side by side (enhanced)".to_string(),
+    }
+}
+
+/// Adaptive description + ASCII preview for the Diff Mode option. The
+/// intro stays the same across modes; only the mock at the bottom
+/// switches to reflect the picked layout.
+fn diff_mode_description(mode: DiffMode) -> String {
+    let intro = "How file diffs are rendered in the Diff and Uncommitted views.\n\n\
+  • Enhanced  = single column, line numbers, expandable gaps\n\
+  • Raw       = plain `git diff` output, no decoration\n\
+  • Side by side  = old | new in two columns\n\
+  • SBS (enhanced) = side by side + line numbers + row bg\n\n";
+    let preview = match mode {
+        DiffMode::Enhanced => {
+            "┌─ src/foo.rs ──────────────────┐\n\
+             │ 12   pub fn foo() {           │\n\
+             │▌13- let x = 1;                │\n\
+             │▌14+ let x = 42;               │\n\
+             │ 15   println!(\"{}\", x);       │\n\
+             │  …                            │\n\
+             └───────────────────────────────┘"
+        }
+        DiffMode::Raw => {
+            "@@ -12,4 +12,4 @@\n\
+             pub fn foo() {\n\
+             -    let x = 1;\n\
+             +    let x = 42;\n\
+                 println!(\"{}\", x);\n\
+             …"
+        }
+        DiffMode::SideBySide => {
+            "┌─ before ──────┬─ after ───────┐\n\
+             │  pub fn foo() │  pub fn foo() │\n\
+             │- let x = 1;   │+ let x = 42;  │\n\
+             │  println!(…)  │  println!(…)  │\n\
+             │  …            │  …            │\n\
+             └───────────────┴───────────────┘"
+        }
+        DiffMode::SideBySideEnhanced => {
+            "┌─ before ──────────┬─ after ───────────┐\n\
+             │ 12  pub fn foo()  │ 12  pub fn foo()  │\n\
+             │▌13- let x = 1;    │▌13+ let x = 42;   │\n\
+             │ 14  println!(…)   │ 14  println!(…)   │\n\
+             │  …                │  …                │\n\
+             └───────────────────┴───────────────────┘"
+        }
+    };
+    format!("{}{}", intro, preview)
+}
+
+fn conflict_view_display(mode: ConflictViewMode) -> String {
+    match mode {
+        ConflictViewMode::ThreePane => "Three-pane".to_string(),
+        ConflictViewMode::TwoPane => "Two-pane".to_string(),
+        ConflictViewMode::Inline => "Inline".to_string(),
+    }
+}
+
+/// Description shown in the right column of the Config view for the
+/// "Resolve Mode" option. Generic text + a compact adaptive ASCII preview
+/// of the picked layout (a single highlighted hunk row + `…` placeholder).
+fn conflict_view_description(mode: ConflictViewMode) -> String {
+    let intro = "Layout used by the merge-conflict editor (opened with `a` \
+on an unmerged file).\n\n\
+  • Ours    = HEAD / current branch\n\
+  • Base    = common ancestor (three-pane only)\n\
+  • Theirs  = the incoming branch\n\n\
+A Result preview is always shown so you see the file as it will be saved.\n\n";
+    let preview = match mode {
+        ConflictViewMode::ThreePane => {
+            "┌─ Ours ───┬─ Base ───┬─ Theirs ─┐\n\
+             │▌ ours    │▌ base    │▌ theirs  │\n\
+             │  …       │  …       │  …       │\n\
+             └──────────┴──────────┴──────────┘\n\
+             ┌─ Result ──────────────────────┐\n\
+             │  ours    ← Ours               │\n\
+             └───────────────────────────────┘"
+        }
+        ConflictViewMode::TwoPane => {
+            "┌─ Ours ────────┬─ Theirs ───────┐\n\
+             │▌ code ours    │▌ code theirs   │\n\
+             │  …            │  …             │\n\
+             └───────────────┴────────────────┘\n\
+             ┌─ Result ────────────────────────┐\n\
+             │  code ours    ← Ours            │\n\
+             └─────────────────────────────────┘"
+        }
+        ConflictViewMode::Inline => {
+            "┌─ Ours ──────────────────────────┐\n\
+             │▌ code ours                      │\n\
+             │  …                              │\n\
+             ├─ Theirs ────────────────────────┤\n\
+             │▌ code theirs                    │\n\
+             │  …                              │\n\
+             ├─ Result ────────────────────────┤\n\
+             │  code ours    ← Ours            │\n\
+             └─────────────────────────────────┘"
+        }
+    };
+    format!("{}{}", intro, preview)
+}
+
+fn rebase_view_display(mode: RebaseViewMode) -> String {
+    match mode {
+        RebaseViewMode::Compact => "Compact".to_string(),
+        RebaseViewMode::Inline => "Inline".to_string(),
+        RebaseViewMode::Split => "Split".to_string(),
+    }
+}
+
+/// Adaptive ASCII preview for the interactive-rebase editor.
+/// Compact = bare list, Inline = each row + italic description
+/// (GitKraken-style), Split = list on top + Result preview block.
+///
+/// Each preview is framed by a box rendered at runtime with `frame_lines`
+/// so every line is padded to the same width, no fragile alignment
+/// of static strings across the three layouts.
+fn rebase_view_description(mode: RebaseViewMode) -> String {
+    let intro = "Layout used by the interactive-rebase editor (opened \
+from the Rebase dialog with `Interactive (-i)` checked).\n\n\
+  • Pick / Reword / Edit / Squash / Fixup / Drop per commit\n\
+  • Space grabs a row, ↑↓ reorder while grabbed\n\
+  • ↵ applies, Esc cancels\n\n";
+    let preview = match mode {
+        RebaseViewMode::Compact => frame_lines(
+            "Compact",
+            &[
+                "▶ [Pick]    abc1234  feat: add login",
+                "  [Squash]  def5678  wip",
+                "  [Reword]  9abcdef  fix typo",
+                "  [Drop]    2222222  oops println",
+                "  …",
+            ],
+        ),
+        RebaseViewMode::Inline => frame_lines(
+            "Inline",
+            &[
+                "▶ [Pick]    abc1234  feat: add login",
+                "     └─ keeps this commit as-is",
+                "  [Squash]  def5678  wip",
+                "     └─ ↑ merges into previous commit",
+                "  [Reword]  9abcdef  fix typo",
+                "     ✎ fix: typo in form _",
+            ],
+        ),
+        RebaseViewMode::Split => {
+            let todo = frame_lines(
+                "Todo",
+                &[
+                    "▶ [Pick]    abc1234  feat: add login",
+                    "  [Squash]  def5678  wip",
+                    "  [Drop]    2222222  oops println",
+                ],
+            );
+            let result = frame_lines(
+                "Result preview",
+                &[
+                    "● feat: add login  (+ wip squashed)",
+                    "✗ oops println  (dropped)",
+                ],
+            );
+            format!("{}\n{}", todo, result)
+        }
+    };
+    format!("{}{}", intro, preview)
+}
+
+/// Build a box-drawn frame around the given lines. Every line is padded
+/// to the same width (longest line + 2) so the right border lines up no
+/// matter what content is passed in.
+fn frame_lines(title: &str, lines: &[&str]) -> String {
+    let content_w = lines
+        .iter()
+        .map(|l| console::measure_text_width(l))
+        .max()
+        .unwrap_or(0)
+        .max(title.len() + 4);
+    let inner_w = content_w + 2; // 1 col padding on each side
+    let mut out = String::new();
+    // Top: ┌─ Title ─...─┐
+    out.push('┌');
+    out.push_str("─ ");
+    out.push_str(title);
+    out.push(' ');
+    let used = 2 + title.len() + 1; // "─ " + title + " "
+    out.push_str(&"─".repeat(inner_w.saturating_sub(used)));
+    out.push('┐');
+    out.push('\n');
+    // Body lines, padded to inner_w
+    for line in lines {
+        out.push('│');
+        out.push(' ');
+        out.push_str(line);
+        let w = console::measure_text_width(line);
+        out.push_str(&" ".repeat(inner_w.saturating_sub(w + 1)));
+        out.push('│');
+        out.push('\n');
+    }
+    // Bottom
+    out.push('└');
+    out.push_str(&"─".repeat(inner_w));
+    out.push('┘');
+    out
+}
+
+fn mouse_display(enabled: bool) -> String {
+    if enabled {
+        "On".to_string()
+    } else {
+        "Off".to_string()
+    }
+}
+
+fn selection_mode_display(mode: SelectionMode) -> String {
+    match mode {
+        SelectionMode::Classic => "Classic".to_string(),
+        SelectionMode::Smart => "Smart".to_string(),
+    }
+}
+
+fn github_auth_display(state: &GithubAuthState, pending: bool) -> String {
+    if pending {
+        return "- Authenticating... -".to_string();
+    }
+    if state.is_authenticated() {
+        return format!(
+            "- Authenticated as {} -",
+            state.login.as_deref().unwrap_or("unknown")
+        );
+    }
+    "- Press to auth -".to_string()
+}
+
+fn github_auth_description(state: &GithubAuthState, pending: bool) -> String {
+    if pending {
+        let message = state
+            .message
+            .clone()
+            .unwrap_or_else(|| "Complete the GitHub device authentication in your browser.".into());
+        return format!(
+            "{message}\n\nPress to copy the code again and re-open https://github.com/login/device"
+        );
+    }
+    if state.is_authenticated() {
+        return "GitHub auth is active. Press to logout.".into();
+    }
+    state
+        .message
+        .clone()
+        .unwrap_or_else(|| "GitHub auth is inactive.".into())
+}
+
+fn github_avatars_description(state: &GithubAuthState, _enabled: bool) -> String {
+    if !state.is_authenticated() {
+        return "Authenticate with GitHub\nto enable avatars.".into();
+    }
+    "Show author avatars in the commit list and detail views.\n\nMight cause some lags.".into()
+}
+
+fn config_footer_hint(selected: usize, state: &GithubAuthState, pending: bool) -> String {
+    // `o:open config file` is always available, let the user pop the config
+    // into $EDITOR from any row. Prepended to the per-row hint with
+    // the same `▕▏` separator the app footer uses elsewhere.
+    let row_hint = if selected == GITHUB_AUTH_INDEX {
+        if pending {
+            "↵:re-copy"
+        } else if state.is_authenticated() {
+            "↵:logout"
+        } else {
+            "↵:auth"
+        }
+    } else if selected == GITHUB_AVATARS_INDEX {
+        if state.is_authenticated() {
+            "↵/⇆:toggle"
+        } else {
+            ""
+        }
+    } else if selected >= TEXT_EDIT_START_INDEX {
+        "↵:edit"
+    } else {
+        "↵/⇆:cycle"
+    };
+    if row_hint.is_empty() {
+        "o:open config file".into()
+    } else {
+        format!("{row_hint}▕▏o:open config file")
+    }
+}
+
+fn config_section_line(title: &str, theme: &crate::color::ColorTheme) -> Line<'static> {
+    let color = theme.list_ref_stash_fg;
+    Line::from(vec![
+        Span::styled("▍ ", Style::default().fg(color)),
+        Span::styled(
+            title.to_string(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
+fn vertical_separator_height(content_height: u16) -> u16 {
+    content_height.saturating_sub(1)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigValueKind {
+    Cycle,
+    Input,
+    Button,
+}
+
+fn config_value_kind(index: usize) -> ConfigValueKind {
+    if index == GITHUB_AUTH_INDEX {
+        ConfigValueKind::Button
+    } else if index == GITHUB_AVATARS_INDEX || index < TEXT_EDIT_START_INDEX {
+        ConfigValueKind::Cycle
+    } else {
+        ConfigValueKind::Input
+    }
+}
+
+fn config_value_fg(kind: ConfigValueKind, theme: &crate::color::ColorTheme) -> Color {
+    match kind {
+        ConfigValueKind::Cycle => theme.status_info_fg,
+        ConfigValueKind::Input => theme.status_success_fg,
+        ConfigValueKind::Button => theme.status_warn_fg,
+    }
+}
+
+/// Byte index of the char boundary immediately before `cursor`.
+/// Assumes `cursor` is itself on a valid boundary (callers guarantee).
+fn prev_char_boundary(s: &str, cursor: usize) -> usize {
+    let mut i = cursor.saturating_sub(1);
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Byte index of the char boundary immediately after `cursor`.
+fn next_char_boundary(s: &str, cursor: usize) -> usize {
+    let len = s.len();
+    let mut i = (cursor + 1).min(len);
+    while i < len && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
+/// Walk back past non-alphanumeric, then past alphanumeric, same
+/// semantics as Ctrl+Backspace / Ctrl+Left in most editors.
+fn editor_word_left(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i > 0 && !bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    while i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+        i -= 1;
+    }
+    i
+}
+
+fn editor_word_right(s: &str, cursor: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = cursor.min(bytes.len());
+    while i < bytes.len() && !bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    i
+}
+
+fn config_value_modifier(index: usize) -> Modifier {
+    match config_value_kind(index) {
+        ConfigValueKind::Button => Modifier::BOLD,
+        ConfigValueKind::Cycle | ConfigValueKind::Input => Modifier::empty(),
+    }
+}
+
+// Config value display conventions:
+//   < value >  = cycle between several options (left/right to change)
+//   [ value ]  = text input field (enter to edit)
+//   [ (value) ]= info display (read-only, e.g. "from git")
+//   - value -  = button (enter/press to activate)
+fn config_value_display(index: usize, value: &str, editing: bool, editing_value: &str) -> String {
+    if editing {
+        editing_value.to_string()
+    } else {
+        match config_value_kind(index) {
+            ConfigValueKind::Button => value.to_string(),
+            ConfigValueKind::Input => value.to_string(),
+            ConfigValueKind::Cycle => format!("< {value} >"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::github_auth::GithubAuthState;
+
+    #[test]
+    fn only_the_mouse_and_the_select_mode_apply_live() {
+        // Adding a `Live` row is a decision (see `ApplyWhen`): this list is
+        // where it shows, so the choice gets looked at in review.
+        let live: Vec<usize> = (0..super::CONFIG_ITEM_COUNT)
+            .filter(|&i| super::ROW_APPLIES[i] == super::ApplyWhen::Live)
+            .collect();
+        assert_eq!(live, vec![super::MOUSE_INDEX, super::SELECT_MODE_INDEX]);
+    }
+
+    #[test]
+    fn what_reloads_or_rebakes_waits_for_the_page_to_close() {
+        for index in [
+            super::RENDERER_INDEX,
+            super::GRAPH_ENABLED_INDEX,
+            super::GRAPH_STYLE_INDEX,
+            super::GRAPH_WIDTH_INDEX,
+        ] {
+            assert_eq!(super::ROW_APPLIES[index], super::ApplyWhen::OnClose);
+        }
+    }
+
+    #[test]
+    fn github_auth_display_shows_authenticated_login() {
+        let state = GithubAuthState {
+            token: Some("token".into()),
+            login: Some("octocat".into()),
+            message: None,
+        };
+
+        assert_eq!(
+            super::github_auth_display(&state, false),
+            "- Authenticated as octocat -"
+        );
+    }
+
+    #[test]
+    fn github_auth_display_shows_pending_before_saved_token() {
+        assert_eq!(
+            super::github_auth_display(&GithubAuthState::default(), true),
+            "- Authenticating... -"
+        );
+    }
+
+    #[test]
+    fn github_auth_display_prompts_enter_to_auth_when_logged_out() {
+        assert_eq!(
+            super::github_auth_display(&GithubAuthState::default(), false),
+            "- Press to auth -"
+        );
+    }
+
+    #[test]
+    fn github_auth_description_does_not_include_enter_prompt_when_logged_out() {
+        let description = super::github_auth_description(&GithubAuthState::default(), false);
+
+        assert!(!description.contains("Press Enter"));
+        assert!(!description.contains("Press to"));
+        assert!(description.contains("inactive"));
+    }
+
+    #[test]
+    fn github_auth_description_includes_logout_prompt_when_authenticated() {
+        let state = GithubAuthState {
+            token: Some("token".into()),
+            login: Some("octocat".into()),
+            message: None,
+        };
+        let description = super::github_auth_description(&state, false);
+
+        assert!(description.contains("logout"));
+    }
+
+    #[test]
+    fn github_auth_pending_description_includes_copy_reopen_hint() {
+        let state = GithubAuthState {
+            message: Some("Enter EB39-EEF2 at https://github.com/login/device".into()),
+            ..GithubAuthState::default()
+        };
+        let description = super::github_auth_description(&state, true);
+
+        assert!(description.contains("Enter EB39-EEF2 at https://github.com/login/device"));
+        assert!(description
+            .contains("Press to copy the code again and re-open https://github.com/login/device"));
+    }
+
+    #[test]
+    fn config_footer_prompts_auth_for_github_auth_row_when_logged_out() {
+        assert_eq!(
+            super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), false),
+            "↵:auth▕▏o:open config file"
+        );
+    }
+
+    #[test]
+    fn config_footer_prompts_logout_for_github_auth_row_when_logged_in() {
+        let state = GithubAuthState {
+            token: Some("token".into()),
+            login: Some("octocat".into()),
+            message: None,
+        };
+
+        assert_eq!(
+            super::config_footer_hint(super::GITHUB_AUTH_INDEX, &state, false),
+            "↵:logout▕▏o:open config file"
+        );
+    }
+
+    #[test]
+    fn config_footer_prompts_recopy_during_pending_auth() {
+        assert_eq!(
+            super::config_footer_hint(super::GITHUB_AUTH_INDEX, &GithubAuthState::default(), true),
+            "↵:re-copy▕▏o:open config file"
+        );
+    }
+
+    #[test]
+    fn github_auth_row_value_is_not_wrapped_in_angle_brackets() {
+        assert_eq!(
+            super::config_value_display(super::GITHUB_AUTH_INDEX, "- Press to auth -", false, "",),
+            "- Press to auth -"
+        );
+    }
+
+    #[test]
+    fn github_avatars_row_value_is_wrapped_in_angle_brackets() {
+        assert_eq!(
+            super::config_value_display(super::GITHUB_AVATARS_INDEX, "enabled", false, ""),
+            "< enabled >"
+        );
+        assert_eq!(
+            super::config_value_display(super::GITHUB_AVATARS_INDEX, "disabled", false, ""),
+            "< disabled >"
+        );
+    }
+
+    #[test]
+    fn config_value_kind_matches_display_conventions() {
+        assert_eq!(
+            super::config_value_kind(super::GITHUB_AUTH_INDEX),
+            super::ConfigValueKind::Button
+        );
+        assert_eq!(
+            super::config_value_kind(super::GITHUB_AVATARS_INDEX),
+            super::ConfigValueKind::Cycle
+        );
+        // First text-edit field (Git Name) sits at TEXT_EDIT_START_INDEX.
+        assert_eq!(
+            super::config_value_kind(super::TEXT_EDIT_START_INDEX),
+            super::ConfigValueKind::Input
+        );
+        // Items before the text-edit block are cycle-able.
+        assert_eq!(super::config_value_kind(0), super::ConfigValueKind::Cycle);
+        assert_eq!(
+            super::config_value_kind(super::TEXT_EDIT_START_INDEX - 1),
+            super::ConfigValueKind::Cycle
+        );
+    }
+
+    #[test]
+    fn config_item_indent_is_lightweight_section_indent() {
+        assert_eq!(super::CONFIG_ITEM_INDENT, " ");
+    }
+
+    #[test]
+    fn vertical_separator_height_keeps_one_line_before_footer() {
+        assert_eq!(super::vertical_separator_height(10), 9);
+        assert_eq!(super::vertical_separator_height(1), 0);
+    }
+}

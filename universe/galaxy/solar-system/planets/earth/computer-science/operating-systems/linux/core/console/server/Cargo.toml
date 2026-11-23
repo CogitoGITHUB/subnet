@@ -1,0 +1,12 @@
+[package]
+name = "console-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "console-server"
+path = "main.rs"
+
+[dependencies]
+runfile = { path = "../runfile" }

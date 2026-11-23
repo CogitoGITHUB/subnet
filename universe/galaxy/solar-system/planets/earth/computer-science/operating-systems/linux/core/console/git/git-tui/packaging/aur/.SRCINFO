@@ -1,0 +1,20 @@
+pkgbase = git-tui-bin
+	pkgdesc = Terminal Git client with an image-rendered commit graph and GitHub PRs
+	pkgver = 0.3.6
+	pkgrel = 1
+	url = https://github.com/NayJi7/gitoui
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = git
+	provides = git-tui
+	conflicts = git-tui
+	options = !debug
+	source = LICENSE-0.3.6::https://raw.githubusercontent.com/NayJi7/gitoui/v0.3.6/LICENSE
+	sha256sums = 99d61b26cd4453bbc03103277ebb8ff89f7854eade50dbf20ac68b86c1b2be05
+	source_x86_64 = git-tui-0.3.6-x86_64.tar.gz::https://github.com/NayJi7/gitoui/releases/download/v0.3.6/git-tui-0.3.6-x86_64-unknown-linux-musl.tar.gz
+	sha256sums_x86_64 = b9fe6ab148ff09180245a5f8061887d6d2f13015e538c8ff80cde04912830a45
+	source_aarch64 = git-tui-0.3.6-aarch64.tar.gz::https://github.com/NayJi7/gitoui/releases/download/v0.3.6/git-tui-0.3.6-aarch64-unknown-linux-musl.tar.gz
+	sha256sums_aarch64 = 9234d1daaeb2a70767a223adaf49ea9804b39c1f521f33fdbfcaba744fa5280d
+
+pkgname = git-tui-bin

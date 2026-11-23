@@ -1,0 +1,54 @@
+# CodeQL static analysis - scans Rust + Actions for known
+# vulnerability patterns and surfaces them in the Security tab.
+#
+# NOT a required status check: findings appear as alerts in the
+# Security → Code scanning tab, but they don't block PRs from merging.
+# Tweak / suppress alerts via the GitHub UI as they come in.
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly run on Sunday so newly-published queries catch existing
+    # code even when nothing has changed.
+    - cron: "0 6 * * 0"
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  packages: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Rust only supports build-mode `none` - the extractor parses
+          # source directly, no cargo build needed (and `manual` is
+          # rejected with a fatal error).
+          - language: rust
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

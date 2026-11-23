@@ -1,0 +1,79 @@
+# Privacy
+
+ssh-manager runs on your machine and nowhere else. There is no account, no server of mine, and no
+telemetry. This page says exactly what it reads, writes, runs, and sends, so you don't have to
+take that on faith. The attacker-facing view (what stored secrets are and aren't protected
+against) is in [SECURITY.md](SECURITY.md).
+
+## What it reads
+
+- Its own files: `hosts.toml` and `config.toml` under `~/.config/ssh-manager/`, and
+  `state.json` / `forwards.json` under `~/.local/share/ssh-manager/`.
+- `~/.ssh/config`, but only when you ask. `ssh-manager import` (or `Ctrl-o`) parses it and copies
+  what it can model into ssh-manager's own database. It is opened read-only and never written back.
+- The file names in `~/.ssh`, so the add form can offer your keys in a picker. For a file
+  with no `.pub` sibling it reads the first 64 bytes to see whether the header says
+  `PRIVATE KEY`. It keeps the path. It never reads a key's contents beyond that header, and
+  never copies a key anywhere.
+
+## What it writes
+
+- Its own files, the four above, always by atomic replace so a crash can't shred them.
+- `~/.config/ssh-manager/ssh_config`, the export fragment, but only after you run
+  `ssh-manager export` once. From then on it is rewritten whenever your hosts change.
+- `~/.local/share/ssh-manager/logs/fwd-<id>.log` while a background port forward is running: that
+  `ssh -N` process's stderr, so a forward that dies can say why. Deleted when the forward stops.
+- `~/.local/share/ssh-manager/run/` (or `$XDG_RUNTIME_DIR/ssh-manager/` when that is set) while the
+  transfer screen is open: a directory per session holding one `ssh` control socket, removed
+  when the screen closes. The same directory holds a small `askpass-<id>` file for each connect
+  where a stored secret was handed to ssh. It records the prompt that was answered, never the
+  secret, so a refused one can be spotted, and it is removed after ten minutes.
+- The transfer log, only if you asked for one with `--transfer-log` or `$SSH_MANAGER_TRANSFER_LOG`.
+- One keyring entry per host you gave a password to, under the service name `ssh-manager`,
+  keyed by the host's id. In vault mode it's a line in `vault.age` instead.
+- Nothing under `~/.ssh`. Not `config`, not anything else, not ever. (The `ssh` ssh-manager
+  launches still maintains your `known_hosts` itself, exactly as it always has.)
+
+## What it runs
+
+`ssh` to connect and to hold port forwards, `ssh` plus `sftp` for the transfer screen, `tmux`
+if you turned on tmux mode, and `tailscale status --json` if you run
+`ssh-manager import --tailscale`. That's the whole list. Each one runs because you pressed a key or
+typed a command, never at startup, never on a timer, never in the background. On the first
+connect to a host with nothing stored, ssh-manager may also run `ssh-keygen -y` on that host's key
+file and one throwaway `ssh ... exit` against the host you are connecting to, to check a secret
+before saving it.
+
+## What it sends
+
+Nothing. No telemetry, no analytics, no crash reports, no update check, no account, no license
+check, no "anonymous usage statistics". ssh-manager opens no network connection of its own, so
+there is nothing to opt out of. The only traffic is the SSH session you asked for, from your
+machine straight to your server.
+
+That is also why there are no live health dots, no fleet metrics, and no cloud-provider
+sync: each of those would mean ssh-manager talking to something on its own.
+
+## Where secrets live
+
+In your OS keyring (macOS Keychain, or the Secret Service on Linux), or in an
+`age`-encrypted `vault.age` if you set `SSH_MANAGER_VAULT_PASSPHRASE` for a headless box. Keyed by
+host id, so renaming a host keeps its password.
+
+Never in `hosts.toml`, which is safe to commit and share. Never on a command line, so
+never in `ps` or your shell history. Never in a log: passwords reach `ssh` through
+`SSH_ASKPASS`, so the forward logs and the optional transfer log record commands, paths and
+errors and no secret. Those do describe your connections in full, which is why they live in
+the data directory at mode 0600 rather than in `/tmp`.
+
+## How to check
+
+- Run `ssh-manager doctor`. It reports which backend holds your secrets and where your files
+  are, and it does it without contacting a host.
+- Read `hosts.toml`. It's TOML, it's yours, and everything ssh-manager knows about a host is in it.
+- Watch it: `lsof`, Little Snitch, or your firewall of choice will show ssh-manager's own process
+  making no connections.
+- The reasoning behind all of this is in the
+  [decision log](https://max-rh.github.io/sshelf/decisions.html).
+
+Something here wrong or unclear? Open an issue. I'd rather fix the page than have you guess.

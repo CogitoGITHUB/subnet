@@ -1,0 +1,143 @@
+<div align="center">
+
+# brochure
+
+**A terminal RSS reader — keyboard-driven, distraction-free.**
+
+[![Crates.io Version](https://img.shields.io/crates/v/brochure?style=flat-square&color=f5c2e7)](https://crates.io/crates/brochure)
+[![Crates.io Downloads](https://img.shields.io/crates/d/brochure?style=flat-square&color=cba6f7)](https://crates.io/crates/brochure)
+[![License: MIT](https://img.shields.io/badge/license-MIT-89dceb?style=flat-square)](LICENSE)
+[![Rust: 1.95+](https://img.shields.io/badge/rust-1.95+-fab387?style=flat-square)](https://www.rust-lang.org)
+
+
+![brochure](https://files.catbox.moe/h6hh4m.png)
+
+</div>
+
+---
+
+## Features
+
+- **RSS & Atom** — both feed formats supported out of the box
+- **Zen mode** — distraction-free full-screen reading view that hides all chrome, configurable content width
+- **Inline images** — PNG, JPEG, and SVG images rendered directly in article content
+- **Categories** — organise feeds into collapsible groups (state remembered across restarts)
+- **Saved articles** — save any article into categories of your own
+- **OPML import/export** — bring your existing subscriptions in, or take them out
+- **Saved articles import/export** — starred-items JSON, the format FreshRSS, Inoreader and other readers use for their starred exports
+- **FreshRSS sync** — sync subscriptions, articles, and read/starred state with a FreshRSS server (grouped under a FreshRSS category)
+- **Mouse support** — click tabs, feeds, articles, settings, and links; scroll with the wheel; drag to copy text; drag and drop in the feed editor
+- **Link hints** — press `f` to label every link and image in an article, then type a label to open it (`F` copies it)
+- **Keybindings popup** — press `?` on any screen to see its keys
+- **Readability fetch** — pulls full article body when the feed only provides a summary
+- **Fetch policy** — choose when brochure refreshes: on start, every hour, every day, or never
+- **Feed editor** — rename, move, and delete feeds and categories without leaving the TUI
+- **Clipboard copy** — copy article or feed URLs with a single keypress
+- **Changelog viewer** — browse release notes from within the app
+
+## Keybindings
+
+| Key | Action |
+|-----|--------|
+| `?` | Keybindings for the current screen |
+| `q` | Quit |
+| `j` / `k`, `↓` / `↑` | Move selection |
+| `Enter` | Open feed, category, or article |
+| `Esc` | Back / close popup |
+| `Tab` / `Shift+Tab` | Switch between Feeds · Saved · Settings · Changelog |
+| `r` / `R` | Refresh selected feed / all feeds |
+| `g` | Jump to top of feed list |
+| `C` | Collapse / expand all categories |
+| `Space` | Collapse / expand category |
+| `e` | Feed editor (rename, move, delete, add) |
+| `y` | Copy feed URL |
+
+**In the article list / reader:**
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open article |
+| `m` | Toggle read / unread |
+| `s` | Save article (pick a category) |
+| `z` | Zen mode — full-screen, distraction-free reading |
+| `O` | Open article in browser |
+| `C` | Copy article link (feed URL from the article list) |
+| `f` / `F` | Link hints: type a label to open / copy a link or image |
+| `n` / `p` | Next / previous article (zen mode) |
+| `PgDn` / `PgUp`, `Home` / `End` | Scroll the article |
+
+**Mouse:** click a tab, feed, category, article, or setting to select it; click the
+selected one again to open it (categories expand/collapse). The wheel scrolls whichever
+panel is under the pointer without moving focus, so you can scroll the sidebar while
+reading. Click a link in an article to open it in your browser, click an image to view it full
+screen, or drag over article text to copy it to the clipboard. In the feed editor, drag feeds and categories to move them
+(drag a category sideways to change its nesting); release outside the panel to cancel.
+
+## Installation
+
+Download a prebuilt binary (Linux, macOS, Windows) without compiling, using
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall brochure
+```
+
+Binaries are also attached to each [GitHub release](https://github.com/Sylviromi/brochure/releases/latest).
+Or build from source (takes a few minutes):
+
+```bash
+cargo install brochure --locked
+```
+
+Update the same way — re-run whichever command you installed with.
+
+Or via [pkgsrc](https://www.pkgsrc.org/) (NetBSD and other platforms):
+
+```bash
+pkgin install brochure
+```
+
+Then launch with:
+
+```bash
+brochure
+```
+
+**Requirements (source builds):** Rust 1.95 or later. Install via [rustup](https://rustup.rs) if needed.
+
+## Data & configuration
+
+brochure stores all data in the platform data directory — no config files to manage manually.
+
+| Platform | Path                                      |
+|----------|-------------------------------------------|
+| Linux    | `~/.local/share/brochure/`                |
+| macOS    | `~/Library/Application Support/brochure/` |
+| Windows  | `%APPDATA%\brochure\`                     |
+
+Files: `feeds.json`, `articles.json`, `categories.json`, `user_data.json`.
+
+OPML and saved-article exports go to your **Downloads** folder by default.
+
+## Screens
+
+<p align="center">
+  <img src="https://files.catbox.moe/s0ripp.png" alt="Zen mode — distraction-free reading" width="49%"/>
+  <img src="https://files.catbox.moe/hb0p0v.png" alt="Saved articles" width="49%"/>
+  <img src="https://files.catbox.moe/j1adrr.png" alt="Settings" width="49%"/>
+  <img src="https://files.catbox.moe/jbny3l.png" alt="Changelog" width="49%"/>
+</p>
+
+## Contributing
+
+Bug reports and feature requests are welcome — [open an issue](https://github.com/Sylviromi/brochure/issues/new).
+
+Pull requests are also welcome. Please run the same checks as CI before submitting:
+
+```bash
+cargo fmt && cargo clippy --all-features -- -D warnings && cargo test --all-features
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

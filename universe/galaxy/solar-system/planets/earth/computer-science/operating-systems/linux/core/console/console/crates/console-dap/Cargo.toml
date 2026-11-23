@@ -1,0 +1,51 @@
+[package]
+authors = ["The Nushell Project Developers"]
+description = "Debug Adapter Protocol server for Nushell scripts"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-dap"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console-dap"
+version.workspace = true
+autotests = false
+
+[lib]
+name = "console_dap"
+harness = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-protocol = { workspace = true, features = ["os"] }
+console-parser = { workspace = true }
+console-engine = { workspace = true, features = ["os"] }
+console-path = { workspace = true }
+console-utils = { workspace = true }
+
+derive_more = { workspace = true, features = ["debug"] }
+miette = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_Foundation"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+# Only the unit tests build a command context to render values against; the
+# adapter itself is handed the host's fully built engine.
+console-cmd-lang = { workspace = true, features = ["os"] }
+console-command = { workspace = true, features = ["os"] }
+console-test-support = { path = "../console-test-support" }
+
+rstest = { workspace = true, default-features = false }
+pretty_assertions = { workspace = true }
+# Only for the rendering matrix in `src/variables.rs`: constructing a
+# `Value::Date` needs a `chrono` type, and a `Value::Custom` case needs a local
+# `CustomValue` stub, whose trait carries `#[typetag::serde]`.
+chrono = { workspace = true, features = ["std"] }
+typetag = "0.2"

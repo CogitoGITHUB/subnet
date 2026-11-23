@@ -1,0 +1,146 @@
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::Paragraph,
+};
+
+use crate::options::OptionSchema;
+use crate::payload::{Body, RatioData};
+use crate::theme::{self, ColorKey, Theme};
+
+use super::{Registry, RenderOptions, Renderer, Shape};
+
+const COLOR_KEYS: &[ColorKey] = &[theme::TEXT, theme::TEXT_DIM];
+
+const OPTION_SCHEMAS: &[OptionSchema] = &[
+    OptionSchema {
+        name: "label",
+        type_hint: "string",
+        required: false,
+        default: Some("payload.label"),
+        description: "Prefix shown before the bar, e.g. `\"year\"` → `year: ████░░░ 32%`. Falls back to `RatioData.label` when omitted.",
+    },
+    OptionSchema {
+        name: "value_format",
+        type_hint: "\"percent\" | \"fraction\" | \"both\"",
+        required: false,
+        default: Some("\"percent\""),
+        description: "Suffix format. `fraction` and `both` require `RatioData.denominator` — otherwise they fall back to `percent`.",
+    },
+];
+
+/// Compact progress indicator: a single-line bar, ratio filled. Good for dense dashboards where
+/// the full-height `gauge_circle` block renderer is too tall. Alternate renderer for the `Ratio` shape.
+pub struct GaugeLineRenderer;
+
+const FILLED: &str = "▓";
+const EMPTY: &str = "░";
+
+impl Renderer for GaugeLineRenderer {
+    fn name(&self) -> &str {
+        "gauge_line"
+    }
+    fn description(&self) -> &'static str {
+        "Single-row progress bar for `Ratio`: optional label, shaded fill across the available width, and a percent or fraction suffix. The lightest member of the `gauge_*` family — pick this for dense dashboards where `gauge_circle` is too tall."
+    }
+    fn accepts(&self) -> &[Shape] {
+        &[Shape::Ratio]
+    }
+    fn color_keys(&self) -> &[ColorKey] {
+        COLOR_KEYS
+    }
+    fn option_schemas(&self) -> &[OptionSchema] {
+        OPTION_SCHEMAS
+    }
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        body: &Body,
+        opts: &RenderOptions,
+        theme: &Theme,
+        _registry: &Registry,
+    ) {
+        if let Body::Ratio(d) = body {
+            render_line_gauge(frame, area, d, opts, theme);
+        }
+    }
+}
+
+fn render_line_gauge(
+    frame: &mut Frame,
+    area: Rect,
+    data: &RatioData,
+    opts: &RenderOptions,
+    theme: &Theme,
+) {
+    let ratio = data.value.clamp(0.0, 1.0);
+    let prefix = resolve_prefix(opts, data);
+    let suffix = format_value(ratio, data.denominator, opts.value_format.as_deref());
+    let reserved = prefix_width(&prefix) + 1 + suffix.chars().count() as u16 + 1;
+    let bar_width = area.width.saturating_sub(reserved);
+    let filled = (f64::from(bar_width) * ratio).round() as u16;
+    let line = Line::from(compose_spans(&prefix, &suffix, filled, bar_width, theme));
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn resolve_prefix(opts: &RenderOptions, data: &RatioData) -> String {
+    opts.label
+        .clone()
+        .or_else(|| data.label.clone())
+        .unwrap_or_default()
+}
+
+fn prefix_width(prefix: &str) -> u16 {
+    if prefix.is_empty() {
+        0
+    } else {
+        // "label: " — count chars + suffix ": ".
+        prefix.chars().count() as u16 + 2
+    }
+}
+
+fn compose_spans<'a>(
+    prefix: &str,
+    suffix: &str,
+    filled: u16,
+    total: u16,
+    theme: &Theme,
+) -> Vec<Span<'a>> {
+    let mut spans = Vec::with_capacity(5);
+    if !prefix.is_empty() {
+        spans.push(Span::styled(
+            format!("{prefix}: "),
+            Style::default().fg(theme.text),
+        ));
+    }
+    spans.push(Span::styled(
+        FILLED.repeat(filled as usize),
+        Style::default().fg(theme.text),
+    ));
+    spans.push(Span::styled(
+        EMPTY.repeat(total.saturating_sub(filled) as usize),
+        Style::default().fg(theme.text_dim),
+    ));
+    spans.push(Span::styled(
+        format!(" {suffix}"),
+        Style::default().fg(theme.text),
+    ));
+    spans
+}
+
+fn format_value(ratio: f64, denominator: Option<u64>, mode: Option<&str>) -> String {
+    let pct = (ratio * 100.0).round() as u64;
+    match (mode.unwrap_or("percent"), denominator) {
+        ("fraction", Some(d)) => format!("{} of {d}", numerator(ratio, d)),
+        ("both", Some(d)) => format!("{pct}% ({} of {d})", numerator(ratio, d)),
+        _ => format!("{pct}%"),
+    }
+}
+
+fn numerator(ratio: f64, denominator: u64) -> u64 {
+    (ratio * denominator as f64).round() as u64
+}
+

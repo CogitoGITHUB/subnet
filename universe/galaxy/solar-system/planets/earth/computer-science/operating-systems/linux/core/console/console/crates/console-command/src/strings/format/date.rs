@@ -1,0 +1,409 @@
+use crate::{generate_strftime_list, parse_date_from_string};
+use chrono::{DateTime, Datelike, Locale, TimeZone};
+use console_engine::command_prelude::*;
+use console_protocol::shell_error::generic::GenericError;
+use pure_rust_locales::locale_match;
+
+use std::fmt::{Display, Write};
+
+#[derive(Clone)]
+pub struct FormatDate;
+
+impl Command for FormatDate {
+    fn name(&self) -> &str {
+        "format date"
+    }
+
+    fn signature(&self) -> Signature {
+        Signature::build("format date")
+            .input_output_types(vec![
+                (Type::Date, Type::String),
+                (Type::String, Type::String),
+                (Type::Nothing, Type::table()),
+                // FIXME Type::Any input added to disable pipeline input type checking, as run-time checks can raise undesirable type errors
+                // which aren't caught by the parser. see https://github.com/nushell/shell/pull/14922 for more details
+                // only applicable for --list flag
+                (Type::Any, Type::table()),
+                (
+                    Type::List(Box::new(Type::Date)),
+                    Type::List(Box::new(Type::String)),
+                ),
+                (
+                    Type::List(Box::new(Type::String)),
+                    Type::List(Box::new(Type::String)),
+                ),
+            ])
+            .allow_variants_without_examples(true) // https://github.com/nushell/shell/issues/7032
+            .switch("list", "Lists strftime cheatsheet.", Some('l'))
+            .optional(
+                "format string",
+                SyntaxShape::String,
+                "The desired format date.",
+            )
+            .category(Category::Strings)
+    }
+
+    fn description(&self) -> &str {
+        "Format a given date using a format string."
+    }
+
+    fn search_terms(&self) -> Vec<&str> {
+        vec!["fmt", "strftime"]
+    }
+
+    fn examples(&self) -> Vec<Example<'_>> {
+        vec![
+            Example {
+                description: "Format a given date-time using the default format (RFC 2822).",
+                example: "'2021-10-22 20:00:12 +01:00' | into datetime | format date",
+                result: Some(Value::string(
+                    "Fri, 22 Oct 2021 20:00:12 +0100".to_string(),
+                    Span::test_data(),
+                )),
+            },
+            Example {
+                description: "Format a given date-time as a string using the default format (RFC 2822).",
+                example: r#""2021-10-22 20:00:12 +01:00" | format date"#,
+                result: Some(Value::string(
+                    "Fri, 22 Oct 2021 20:00:12 +0100".to_string(),
+                    Span::test_data(),
+                )),
+            },
+            Example {
+                description: "Format a given date-time according to the RFC 3339 standard.",
+                example: r#"'2021-10-22 20:00:12 +01:00' | into datetime | format date "%+""#,
+                result: Some(Value::string(
+                    "2021-10-22T20:00:12+01:00".to_string(),
+                    Span::test_data(),
+                )),
+            },
+            Example {
+                description: "Format the current date-time using a given format string.",
+                example: r#"date now | format date "%Y-%m-%d %H:%M:%S""#,
+                result: None,
+            },
+            Example {
+                description: "Format the current date using a given format string.",
+                example: r#"date now | format date "%Y-%m-%d %H:%M:%S""#,
+                result: None,
+            },
+            Example {
+                description: "Format a given date using a given format string.",
+                example: r#""2021-10-22 20:00:12 +01:00" | format date "%Y-%m-%d""#,
+                result: Some(Value::test_string("2021-10-22")),
+            },
+            Example {
+                description: "Format a list of date strings using a given format string.",
+                example: r#"["2021-10-22 20:00:12 +01:00", "2021-10-23 20:00:12 +01:00"] | format date "%Y-%m-%d""#,
+                result: Some(Value::list(
+                    vec![
+                        Value::test_string("2021-10-22"),
+                        Value::test_string("2021-10-23"),
+                    ],
+                    Span::test_data(),
+                )),
+            },
+            Example {
+                description: "Format a list of datetimes using a given format string.",
+                example: r#"[2021-10-22T20:00:12+01:00, 2021-10-23T20:00:12+01:00] | format date "%Y-%m-%d""#,
+                result: Some(Value::list(
+                    vec![
+                        Value::test_string("2021-10-22"),
+                        Value::test_string("2021-10-23"),
+                    ],
+                    Span::test_data(),
+                )),
+            },
+        ]
+    }
+
+    fn is_const(&self) -> bool {
+        true
+    }
+
+    fn run(
+        &self,
+        engine_state: &EngineState,
+        stack: &mut Stack,
+        call: &Call,
+        input: PipelineData,
+    ) -> Result<PipelineData, ShellError> {
+        let list = call.has_flag(engine_state, stack, "list")?;
+        let format = call.opt::<Spanned<String>>(engine_state, stack, 0)?;
+        let locale = get_locale(|name| stack.get_env_var(engine_state, name)?.as_str().ok());
+
+        run(engine_state, call, input, list, format, locale)
+    }
+
+    fn run_const(
+        &self,
+        working_set: &StateWorkingSet,
+        stack: &mut Stack,
+        call: &Call,
+        input: PipelineData,
+    ) -> Result<PipelineData, ShellError> {
+        let list = call.has_flag_const(working_set, stack, "list")?;
+        let format = call.opt_const::<Spanned<String>>(working_set, stack, 0)?;
+        let locale = get_locale(|name| working_set.get_env_var(name)?.as_str().ok());
+
+        run(working_set.permanent(), call, input, list, format, locale)
+    }
+}
+
+fn get_locale<'a, F>(env_getter: F) -> Locale
+where
+    F: Fn(&str) -> Option<&'a str> + 'a,
+{
+    console_utils::get_locale_from_env_vars(Some("LC_TIME"), env_getter)
+        .and_then(|s| Locale::try_from(s.as_ref()).ok())
+        .unwrap_or(Locale::en_US)
+}
+
+fn run(
+    engine_state: &EngineState,
+    call: &Call,
+    input: PipelineData,
+    list: bool,
+    format: Option<Spanned<String>>,
+    locale: Locale,
+) -> Result<PipelineData, ShellError> {
+    let head = call.head;
+    if list {
+        return Ok(PipelineData::value(
+            generate_strftime_list(head, false),
+            None,
+        ));
+    }
+
+    // This doesn't match explicit nulls
+    if let PipelineData::Empty = input {
+        return Err(ShellError::PipelineEmpty { dst_span: head });
+    }
+    input.map(
+        move |value| match &format {
+            Some(format) => format_helper(value, format.item.as_str(), format.span, head, locale),
+            None => format_helper_rfc2822(value, head),
+        },
+        engine_state.signals(),
+    )
+}
+
+/// Expand the locale-dependent specifiers ourselves, with `%E`/`%O` removed.
+///
+/// chrono expands `%x`, `%X`, `%c` and `%r` from the locale's own format
+/// strings while rendering, so a modifier the user never typed can appear at
+/// that point. `%E` and `%O` select an "alternative representation" that POSIX
+/// says to ignore when the implementation has none, but chrono implements
+/// neither and reports a format error instead. `th_TH` and `lo_LA` both carry
+/// `%Ey` (Buddhist era) in their `d_fmt`, so every `format date` under those
+/// locales failed, including the one in `default_env.nu` that greets you at
+/// startup (#15266).
+///
+/// Doing the expansion here keeps the locale's own field order — `th_TH` still
+/// renders `27/08/26` rather than the `08/27/26` a fallback locale would give —
+/// and only drops the era representation chrono cannot produce.
+fn resolve_locale_specifiers(formatter: &str, locale: Locale) -> String {
+    // Expand first, then strip: the expansion is what introduces `%Ey`.
+    // Strip before as well, so `%Ex` still reaches the expansion as `%x`.
+    let stripped = strip_alternative_modifiers(formatter);
+    let expanded = expand_locale_specifiers(&stripped, locale);
+    strip_alternative_modifiers(&expanded)
+}
+
+fn expand_locale_specifiers(formatter: &str, locale: Locale) -> String {
+    let mut out = String::with_capacity(formatter.len());
+    let mut chars = formatter.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        // `%%` is a literal percent, not the start of a specifier.
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            out.push_str("%%");
+            continue;
+        }
+
+        let expansion = match chars.peek() {
+            Some('x') => Some(locale_match!(locale => LC_TIME::D_FMT)),
+            Some('X') => Some(locale_match!(locale => LC_TIME::T_FMT)),
+            Some('c') => Some(locale_match!(locale => LC_TIME::D_T_FMT)),
+            Some('r') => {
+                // A locale can have no am/pm form at all — `t_fmt_ampm` is ""
+                // for `de_DE`, `fr_FR`, `nl_NL`, `az_IR` and `fa_IR`. chrono
+                // falls back to the plain time format there, so do that same
+                // substitution here: handing `%r` back to chrono would let its
+                // fallback reintroduce the modifier we are removing, which is
+                // what left `az_IR`/`fa_IR` (`t_fmt` = `%OH:%OM:%OS`) failing.
+                let ampm = locale_match!(locale => LC_TIME::T_FMT_AMPM);
+                Some(if ampm.is_empty() {
+                    locale_match!(locale => LC_TIME::T_FMT)
+                } else {
+                    ampm
+                })
+            }
+            _ => None,
+        };
+
+        // An empty expansion would erase the output, so leave the specifier
+        // alone and let chrono resolve it.
+        match expansion {
+            Some(fmt) if !fmt.is_empty() => {
+                chars.next();
+                out.push_str(fmt);
+            }
+            _ => out.push('%'),
+        }
+    }
+
+    out
+}
+
+fn strip_alternative_modifiers(formatter: &str) -> String {
+    let mut out = String::with_capacity(formatter.len());
+    let mut chars = formatter.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('%') => {
+                chars.next();
+                out.push_str("%%");
+            }
+            // `%Ey` becomes `%y`, `%Od` becomes `%d`: the specifier stays, the
+            // alternative representation is what goes.
+            Some('E') | Some('O') => {
+                chars.next();
+                out.push('%');
+            }
+            _ => out.push('%'),
+        }
+    }
+
+    out
+}
+
+fn format_from<Tz: TimeZone>(
+    date_time: DateTime<Tz>,
+    formatter: &str,
+    span: Span,
+    locale: Locale,
+) -> Value
+where
+    Tz::Offset: Display,
+{
+    let mut formatter_buf = String::new();
+    // Handle custom format specifiers for compact formats
+    let processed_formatter = formatter
+        .replace("%J", "%Y%m%d") // %J for joined date (YYYYMMDD)
+        .replace("%Q", "%H%M%S"); // %Q for sequential time (HHMMSS)
+    let processed_formatter = resolve_locale_specifiers(&processed_formatter, locale);
+    let format = date_time.format_localized(&processed_formatter, locale);
+
+    match formatter_buf.write_fmt(format_args!("{format}")) {
+        Ok(_) => Value::string(formatter_buf, span),
+        Err(_) => Value::error(
+            ShellError::TypeMismatch {
+                err_message: "invalid format".to_string(),
+                span,
+            },
+            span,
+        ),
+    }
+}
+
+fn format_helper(
+    value: Value,
+    formatter: &str,
+    formatter_span: Span,
+    head_span: Span,
+    locale: Locale,
+) -> Value {
+    match value {
+        Value::Date { val, .. } => format_from(val, formatter, formatter_span, locale),
+        Value::String { val, .. } => {
+            let dt = parse_date_from_string(&val, formatter_span);
+
+            match dt {
+                Ok(x) => format_from(x, formatter, formatter_span, locale),
+                Err(e) => e,
+            }
+        }
+        _ => Value::error(
+            ShellError::OnlySupportsThisInputType {
+                exp_input_type: "date, string (that represents datetime)".into(),
+                wrong_type: value.get_type().to_string(),
+                dst_span: head_span,
+                src_span: value.span(),
+            },
+            head_span,
+        ),
+    }
+}
+
+fn format_helper_rfc2822(value: Value, span: Span) -> Value {
+    let val_span = value.span();
+    match value {
+        Value::Date { val, .. } => Value::string(
+            {
+                if val.year() >= 0 && val.year() <= 9999 {
+                    val.to_rfc2822()
+                } else {
+                    return Value::error(
+                        ShellError::Generic(
+                            GenericError::new(
+                                "Can't convert date to RFC 2822 format.",
+                                "the RFC 2822 format only supports years 0 through 9999",
+                                val_span,
+                            )
+                            .with_help(r#"use the RFC 3339 format option: "%+""#),
+                        ),
+                        span,
+                    );
+                }
+            },
+            span,
+        ),
+        Value::String { val, .. } => {
+            let dt = parse_date_from_string(&val, val_span);
+            match dt {
+                Ok(x) => Value::string(
+                    {
+                        if x.year() >= 0 && x.year() <= 9999 {
+                            x.to_rfc2822()
+                        } else {
+                            return Value::error(
+                                ShellError::Generic(
+                                    GenericError::new(
+                                        "Can't convert date to RFC 2822 format.",
+                                        "the RFC 2822 format only supports years 0 through 9999",
+                                        val_span,
+                                    )
+                                    .with_help(r#"use the RFC 3339 format option: "%+""#),
+                                ),
+                                span,
+                            );
+                        }
+                    },
+                    span,
+                ),
+                Err(e) => e,
+            }
+        }
+        _ => Value::error(
+            ShellError::OnlySupportsThisInputType {
+                exp_input_type: "date, string (that represents datetime)".into(),
+                wrong_type: value.get_type().to_string(),
+                dst_span: span,
+                src_span: val_span,
+            },
+            span,
+        ),
+    }
+}
+

@@ -1,0 +1,267 @@
+force_quit = ["ctrl-c"]
+quit = ["q"]
+help_toggle = ["?","f1"]
+cancel = ["esc"]
+close = []
+
+navigate_up = ["k", "up"]
+navigate_down = ["j", "down"]
+navigate_right = ["l", "right"]
+navigate_left = ["h", "left"]
+go_to_parent = ["alt-j", "alt-down"]
+select_up = ["shift-k"]
+select_down = ["shift-j"]
+
+go_to_top = ["g"]
+go_to_bottom = ["shift-g"]
+scroll_down = ["ctrl-e"]
+scroll_up = ["ctrl-y"]
+page_up = ["ctrl-b", "pageup"]
+page_down = ["ctrl-f", "pagedown"]
+half_page_up = ["ctrl-u"]
+half_page_down = ["ctrl-d"]
+select_top = []
+select_middle = ["shift-m"]
+select_bottom = ["shift-l"]
+
+go_to_next = ["n"]
+go_to_previous = ["shift-n"]
+confirm = ["enter"]
+ref_list = ["tab"]
+search = ["f"]
+ignore_case_toggle = ["s"]
+fuzzy_toggle = ["z"]
+refresh = ["r"]
+
+# 2-commit comparison: Space on a first commit marks it, then Space on a
+# second commit opens `git diff <a>..<b>`. The mouse equivalent is
+# Ctrl+click (Space has no mouse counterpart).
+mark_compare = ["space"]
+
+push = ["shift-p"]
+pull = ["shift-u"]
+
+# copy part of information, ex: copy the short commit hash not all
+config = ["p"]
+
+# copy part of information, ex: copy the short commit hash not all
+short_copy = ["shift-c"]
+full_copy = ["c"]
+
+# Phase 2 - Commit detail actions
+add_tag = ["t"]
+create_branch = ["shift-b"]
+blame = ["b"]
+checkout = ["o"]
+cherry_pick = ["shift-o"]
+pull_requests = ["shift-r"]
+issues = ["shift-i"]
+drop = ["d"]
+merge = ["m"]
+rebase = ["e"]
+reset = ["shift-s"]
+squash = ["ctrl-s"]
+
+# Phase 2 - Branch detail actions
+rename_branch = ["ctrl-r"]
+delete_branch = ["shift-d"]
+push_branch = ["shift-q"]
+# `pull` (shift-u) doubles as `pull_branch` in the BranchDetail view via
+# `UserEvent::PullBranch | UserEvent::Pull` - see `src/view/branch_detail.rs`.
+# Leaving this empty keeps `U` as the single canonical pull keybind.
+pull_branch = []
+# `shift-i` used to live here, but it now opens the Issues view
+# globally. `ctrl-t` (mnemonic: Track upstream) replaces it; users
+# in BranchDetail can still set upstream by clicking row 6 of the
+# action panel as before.
+set_upstream = ["ctrl-t"]
+create_archive = ["shift-e"]
+unselect_branch = ["shift-t"]
+copy_branch_name = ["shift-v"]
+
+# Phase 2 - Tag detail actions
+delete_tag = ["shift-f"]
+push_tag = ["shift-w"]
+copy_tag_name = ["shift-y"]
+
+# Phase 2 - Uncommitted actions
+stage = ["a"]
+stage_all = ["shift-a"]
+unstage = ["u"]
+# `pull` (shift-u) doubles as unstage_all when the active view is Uncommitted -
+# see the `UserEvent::UnstageAll | UserEvent::Pull` match in
+# `src/view/uncommitted.rs`. Leaving this empty avoids a global keybind clash
+# with `pull` while preserving the U-for-unstage-all UX in the Uncommitted view.
+unstage_all = []
+discard = ["x"]
+discard_all = ["shift-x"]
+stash = ["i"]
+commit = ["w"]
+clean_untracked = ["v"]
+
+# Phase 2 - Stash actions
+apply_stash = ["y"]
+pop_stash = ["ctrl-p"]
+drop_stash = ["ctrl-x"]
+create_branch_from_stash = ["ctrl-n"]
+copy_stash_name = ["ctrl-i"]
+copy_stash_hash = ["ctrl-o"]
+
+# Diff view file cycling (replaces left/right arrows which are used for button navigation)
+cycle_file_next = ["+"]
+cycle_file_prev = ["-"]
+
+# Abort in-progress rebase/merge/cherry-pick
+abort_operation = ["ctrl-a"]
+
+# Amend HEAD commit message (from detail view, HEAD only)
+amend_commit = ["ctrl-m"]
+
+# Show file history (git log --follow) from diff view
+file_history = ["shift-h"]
+
+# ─────────────────────────────────────────────────────────────────────
+# View-scoped bindings.
+#
+# Anything below this point belongs to a specific view (or sub-view).
+# When a key is bound here, the view's scoped resolver hits it FIRST -
+# the global section above is the fallback. That's how we let the same
+# key (e.g. `a`) mean different things in different contexts:
+#  • `a` globally  → stage  (uncommitted view)
+#  • `a` in PR     → approve
+#  • `a` in issues → assignees picker
+#
+# Each `[scope]` block lists action_name → key list, same syntax as
+# the global section. Nested tables like `[pr.conversation]` are
+# sub-scopes that override their parent - so a Conversation-only
+# binding wins over a PR-wide one, which wins over the global one.
+# Anything not listed in a scope falls through to the parent.
+# ─────────────────────────────────────────────────────────────────────
+
+# Commit list view - scope-only actions that overlay the global key
+# map for the list view exclusively. `h` is `navigate_left` globally
+# (used by vim users + by tab-switching in PR / Issues / Diff), but in
+# the commit list it has no left/right semantics, so we repurpose it
+# for "scroll + select the HEAD commit" - a fast way to jump back to
+# the top of `git log --all` after scrolling far down history.
+[scope.list]
+select_head_commit = ["h"]
+terminal = ["t"]
+actions = ["shift-a"]
+
+# Integrated terminal (`t` on the commit list). Every key goes to the shell,
+# except `back` which returns to the graph and leaves the shell running.
+[scope.terminal]
+back = ["ctrl-q"]
+
+# Commit detail view - `v` globally fires `clean_untracked` (uncommitted
+# view's "remove untracked files" dialog). In the detail view there's
+# nothing to clean, so we re-scope `v` to `revert` - opens the Revert
+# confirmation dialog for the focused commit.
+[scope.detail]
+revert = ["v"]
+
+# PR view - actions on the open Pull Request as a whole.
+[scope.pr]
+reload             = ["r"]
+approve            = ["a"]
+request_changes    = ["x"]
+merge              = ["m"]
+open_in_browser    = ["o"]
+labels_picker      = ["l"]
+reviewers_picker   = ["v"]
+close_pr           = ["ctrl-x"]
+reopen_pr          = ["ctrl-o"]
+toggle_draft       = ["ctrl-d"]
+
+[scope.pr.list]
+new_pr = ["n"]
+
+[scope.pr.conversation]
+new_comment = ["c"]
+quote_reply = ["shift-r"]
+edit_own    = ["e"]
+delete_own  = ["d"]
+react       = ["+"]
+
+# Issues view - actions on the open Issue as a whole.
+[scope.issues]
+reload            = ["r"]
+labels_picker     = ["l"]
+assignees_picker  = ["a"]
+milestone_picker  = ["m"]
+close_or_reopen   = ["x"]
+open_in_browser   = ["o"]
+
+[scope.issues.list]
+new_issue = ["n"]
+
+[scope.issues.detail]
+new_comment            = ["c"]
+quote_reply            = ["shift-r"]
+reference_in_new_issue = ["shift-n"]
+edit_own               = ["e"]
+delete_own             = ["d"]
+react                  = ["+"]
+
+# Rebase plan editor - single-char rebase commands.
+[scope.rebase]
+pick           = ["p"]
+reword         = ["r"]
+edit           = ["e"]
+squash         = ["s"]
+fixup          = ["f"]
+drop           = ["d"]
+grab           = ["space"]
+abort_previous = ["shift-a"]
+
+# Rebase resume prompt - shown when an interactive rebase is paused.
+[scope.rebase.resume]
+continue_rebase = ["c", "shift-c"]
+skip_commit     = ["s", "shift-s"]
+abort           = ["a", "shift-a"]
+
+# Reword inline editor - extra word-jump shortcuts inside the text field.
+# (Named `reword_editor` to avoid colliding with the `reword` action above.)
+[scope.rebase.reword_editor]
+delete_word_left  = ["ctrl-h", "ctrl-w", "ctrl-backspace"]
+delete_word_right = ["ctrl-delete"]
+word_left         = ["ctrl-left"]
+word_right        = ["ctrl-right"]
+
+# 3-way conflict editor.
+[scope.conflict]
+pick_ours              = ["o"]
+pick_theirs            = ["t"]
+pick_both_ours_first   = ["b"]
+pick_both_theirs_first = ["shift-b"]
+next_hunk              = ["n"]
+prev_hunk              = ["p"]
+
+# Compose forms (new PR / new Issue). The submit action is the only
+# truly rebindable shortcut here - word-jump editing keys (Ctrl+H,
+# Ctrl+W, Ctrl+Backspace, Ctrl+Delete, Ctrl+Left/Right) stay hardcoded
+# because they're text-input semantics shared with every other input
+# field in the app, not view-specific actions. The mention popup is
+# tied to the literal `#` character in the body parser, so it isn't
+# rebindable either.
+[scope.compose]
+# Ctrl+Enter is the one the footers show. Many terminals send a plain Enter
+# for it, so Ctrl+S stays as the combo that works everywhere.
+submit = ["ctrl-enter", "ctrl-s"]
+
+# GitHub Actions page (`A` on the commit list): one accordion, runs unfold
+# into jobs, jobs into steps, steps into their log. Esc closes the page.
+[scope.actions]
+reload = ["r"]
+open_web = ["o"]
+rerun = ["shift-r"]
+rerun_failed = ["shift-f"]
+cancel = ["x"]
+current_branch = ["b"]
+search = ["f"]
+switch = ["tab"]
+timestamps = ["t"]
+copy = ["c"]
+next_error = ["n"]
+prev_error = ["shift-n"]

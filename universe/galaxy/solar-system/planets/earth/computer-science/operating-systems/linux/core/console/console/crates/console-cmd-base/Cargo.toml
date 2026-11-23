@@ -1,0 +1,23 @@
+[package]
+authors.workspace = true
+description = "The foundation tools to build Nushell commands."
+edition.workspace = true
+license.workspace = true
+name = "console-cmd-base"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-cmd-base"
+rust-version.workspace = true
+version.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lints]
+workspace = true
+
+[dependencies]
+console-engine.workspace = true
+console-parser.workspace = true
+console-path.workspace = true
+console-protocol.workspace = true
+
+indexmap = { workspace = true }
+miette = { workspace = true }

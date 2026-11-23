@@ -1,0 +1,37 @@
+[package]
+authors.workspace = true
+description = "Functionality for building Nushell plugins"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-plugin"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console-plugin"
+version.workspace = true
+
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["local-socket"]
+local-socket = ["console-plugin-core/local-socket"]
+
+[dependencies]
+console-engine = { workspace = true, features = ["plugin"] }
+console-protocol = { workspace = true, features = ["plugin"] }
+console-plugin-protocol.workspace = true
+console-plugin-core.workspace = true
+console-utils.workspace = true
+
+log = { workspace = true }
+thiserror = { workspace = true}
+
+[dev-dependencies]
+serde = { workspace = true }
+typetag = "0.2"
+
+[target.'cfg(target_family = "unix")'.dependencies]
+# For setting the process group ID (EnterForeground / LeaveForeground)
+nix = { workspace = true, default-features = false, features = ["process"] }

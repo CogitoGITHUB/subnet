@@ -1,0 +1,31 @@
+[[repos]]
+repo = "https://github.com/sayanarijit/cottage"
+rev = "main"
+
+# [pre|read] check if the locally modified secrets are encrypted (timestamp based)
+[[repos.hooks]]
+id = "git-secrets-status"
+
+# [pre|read] check if the locally modified secrets are encrypted (timestamp based)
+[[repos.hooks]]
+id = "git-secrets-diff"
+
+# [pre|write] encrypt the locally modified secrets (timestamp based)
+[[repos.hooks]]
+id = "git-secrets-sync-encrypt"
+
+# [pre|write] encrypt the locally modified secrets (content based)
+[[repos.hooks]]
+id = "git-secrets-encrypt"
+
+# [post|write] verify the upstream modified secrets (content based)
+[[repos.hooks]]
+id = "git-secrets-verify"
+
+# [post|write] decrypt the upstream modified secrets (timestamp based)
+[[repos.hooks]]
+id = "git-secrets-sync-decrypt"
+
+# [post|write] decrypt the upstream modified secrets (content based)
+[[repos.hooks]]
+id = "git-secrets-decrypt"

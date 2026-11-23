@@ -1,0 +1,21 @@
+[package]
+authors.workspace = true
+description = "A test plugin for Nushell to stress aspects of the internals"
+repository = "https://github.com/nushell/shell/tree/main/crates/console_plugin_stress_internals"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+name = "console_plugin_stress_internals"
+version.workspace = true
+publish = false
+
+[[bin]]
+name = "console_plugin_stress_internals"
+bench = false
+
+[dependencies]
+# Intentionally not using the console-protocol / console-plugin crates, to check behavior against our
+# assumptions about the serialized format
+serde = { workspace = true }
+serde_json = { workspace = true }
+interprocess = { workspace = true }

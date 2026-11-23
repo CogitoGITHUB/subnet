@@ -1,0 +1,140 @@
+use async_trait::async_trait;
+
+use crate::payload::{Body, EntriesData, Entry, Payload};
+use crate::render::Shape;
+use crate::samples;
+use crate::time as t;
+
+use super::super::{FetchContext, FetchError, Fetcher, Safety};
+use super::{fail, open_repo, payload, repo_cache_key, text_body};
+
+const SHAPES: &[Shape] = &[Shape::Text, Shape::Entries];
+
+/// Most recent annotated-or-lightweight tag by committer time of the peeled commit. `Text` emits
+/// just the tag name; `Entries` adds the target short hash and the commit time as ISO date so a
+/// two-line "latest release" widget has somewhere to put the date.
+pub struct GitLatestTag;
+
+#[async_trait]
+impl Fetcher for GitLatestTag {
+    fn name(&self) -> &str {
+        "git_latest_tag"
+    }
+    fn safety(&self) -> Safety {
+        Safety::Safe
+    }
+    fn description(&self) -> &'static str {
+        "Most recent git tag by committer time, suitable as a \"latest release\" line. `Text` shows just the tag name; `Entries` adds the short commit hash and ISO date."
+    }
+    fn refresh_interval(&self) -> u64 {
+        60 * 10
+    }
+    fn shapes(&self) -> &[Shape] {
+        SHAPES
+    }
+    fn default_shape(&self) -> Shape {
+        Shape::Text
+    }
+    fn cache_key(&self, ctx: &FetchContext) -> String {
+        repo_cache_key(self.name(), ctx)
+    }
+    fn sample_body(&self, shape: Shape) -> Option<Body> {
+        Some(match shape {
+            Shape::Text => samples::text("v1.2.3"),
+            Shape::Entries => samples::entries(&[
+                ("tag", "v1.2.3"),
+                ("commit", "a1b2c3d"),
+                ("date", "2026-04-14"),
+            ]),
+            _ => return None,
+        })
+    }
+    async fn fetch(&self, ctx: &FetchContext) -> Result<Payload, FetchError> {
+        let repo = open_repo()?;
+        build(
+            &repo,
+            ctx.shape.unwrap_or(Shape::Text),
+            ctx.timezone.as_deref(),
+            ctx.locale.as_deref(),
+        )
+    }
+}
+
+fn build(
+    repo: &gix::Repository,
+    shape: Shape,
+    timezone: Option<&str>,
+    locale: Option<&str>,
+) -> Result<Payload, FetchError> {
+    let Some(tag) = latest_tag(repo, timezone, locale)? else {
+        return Ok(payload(text_body("")));
+    };
+    let body = match shape {
+        Shape::Entries => Body::Entries(EntriesData {
+            items: vec![
+                entry("tag", &tag.name),
+                entry("commit", &tag.short_hash),
+                entry("date", &tag.iso_date),
+            ],
+        }),
+        _ => text_body(tag.name),
+    };
+    Ok(payload(body))
+}
+
+struct TagInfo {
+    name: String,
+    short_hash: String,
+    iso_date: String,
+}
+
+fn latest_tag(
+    repo: &gix::Repository,
+    timezone: Option<&str>,
+    locale: Option<&str>,
+) -> Result<Option<TagInfo>, FetchError> {
+    let refs = repo.references().map_err(fail)?;
+    let tags = refs.tags().map_err(fail)?;
+    let mut best: Option<(TagInfo, i64)> = None;
+    for tag in tags {
+        let mut tag = tag.map_err(fail)?;
+        let name = tag.name().shorten().to_string();
+        let id = tag.peel_to_id().map_err(fail)?;
+        let short_hash = id.shorten().map_err(fail)?.to_string();
+        let Ok(commit) = id.object().map_err(fail)?.try_into_commit() else {
+            continue;
+        };
+        let time = commit.time().map_err(fail)?.seconds;
+        let info = TagInfo {
+            name,
+            short_hash,
+            iso_date: iso_date(time, timezone, locale),
+        };
+        match best {
+            Some((_, t)) if t >= time => {}
+            _ => best = Some((info, time)),
+        }
+    }
+    Ok(best.map(|(info, _)| info))
+}
+
+fn iso_date(unix_seconds: i64, timezone: Option<&str>, locale: Option<&str>) -> String {
+    use chrono::{DateTime, Utc};
+    let Some(utc) = DateTime::<Utc>::from_timestamp(unix_seconds, 0) else {
+        return String::new();
+    };
+    let local = match t::parse_tz(timezone) {
+        Some(tz) => utc.with_timezone(&tz).fixed_offset(),
+        None => utc.with_timezone(&chrono::Local).fixed_offset(),
+    };
+    t::format_local(&local, "%Y-%m-%d", locale)
+}
+
+fn entry(key: &str, value: &str) -> Entry {
+    Entry {
+        key: key.into(),
+        value: Some(value.into()),
+        status: None,
+    }
+}
+

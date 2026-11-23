@@ -1,0 +1,12 @@
+{
+  "name": "state-plugin",
+  "private": true,
+  "type": "module",
+  "description": "CyberDeck state feed tools for OpenCode (V-5)",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.31"
+  }
+}

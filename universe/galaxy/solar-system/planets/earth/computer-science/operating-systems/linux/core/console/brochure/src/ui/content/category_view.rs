@@ -1,0 +1,112 @@
+//! Category article list preview rendering (flat date-sorted view when a category header is selected).
+
+use crate::app::App;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    prelude::Stylize,
+    style::Style,
+    widgets::{List, ListItem, Paragraph},
+};
+
+use super::super::{content_block, render_scrollbar};
+use super::{
+    article_list::build_article_list_item,
+    footer::{draw_article_footer, split_footer},
+};
+
+/// Render the article list panel as a flat date-sorted preview when the sidebar
+/// cursor rests on a category header (FeedList state, no navigation cursor).
+pub(super) fn draw_category_article_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let cat_id = match app.selected_sidebar_category {
+        Some(id) => id,
+        None => return,
+    };
+    let cat_name = app
+        .categories
+        .iter()
+        .find(|c| c.id == cat_id)
+        .map(|c| c.name.as_str())
+        .unwrap_or("Category");
+
+    let (content_area, footer_area) = split_footer(area);
+
+    let block = content_block(
+        format!(" {} ", cat_name).fg(app.theme.link).bold(),
+        false,
+        app.user_data.border_rounded,
+        &app.theme,
+    );
+    let inner = block.inner(content_area);
+    f.render_widget(block, content_area);
+    app.hit.article_list = inner;
+
+    if app.category_view_articles.is_empty() {
+        f.render_widget(
+            Paragraph::new(" No articles in this category.")
+                .style(Style::default().fg(app.theme.muted)),
+            inner,
+        );
+        draw_article_footer(f, app, footer_area, false);
+        return;
+    }
+
+    let total = app.category_view_articles.len();
+    let has_scrollbar = total > inner.height as usize;
+    let list_render_area = if has_scrollbar {
+        Rect {
+            width: inner.width.saturating_sub(1),
+            ..inner
+        }
+    } else {
+        inner
+    };
+
+    let items: Vec<ListItem> = app
+        .category_view_articles
+        .iter()
+        .map(|&(fi, ai)| {
+            let Some(article) = app.feeds.get(fi).and_then(|f| f.articles.get(ai)) else {
+                return ListItem::new("");
+            };
+            build_article_list_item(
+                article,
+                false,
+                false,
+                list_render_area.width,
+                app.tick,
+                app.article_title_start_tick,
+                &app.theme,
+            )
+        })
+        .collect();
+    // Preview has no cursor: it starts at the top unless wheel-scrolled.
+    if !app.detached.article_list {
+        *app.article_list_state.offset_mut() = 0;
+    }
+    super::super::sync_list_view(&mut app.article_list_state, 0, true, total, inner.height);
+    f.render_stateful_widget(
+        List::new(items),
+        list_render_area,
+        &mut app.article_list_state,
+    );
+    if has_scrollbar {
+        let bar_area = Rect {
+            x: inner.x + inner.width.saturating_sub(1),
+            width: 1,
+            ..inner
+        };
+        let offset = app.article_list_state.offset();
+        render_scrollbar(
+            f,
+            bar_area,
+            total,
+            inner.height as usize,
+            offset,
+            &app.theme,
+            Some((&mut app.hit, crate::models::ScrollTarget::ArticleList)),
+        );
+    }
+
+    draw_article_footer(f, app, footer_area, false);
+}

@@ -1,0 +1,37 @@
+{
+  "session-start": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "aiusec clean -qqq"
+      }
+    ],
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "aiusec clean -qqq"
+      }
+    ]
+  },
+  "turn-start": {
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "aiusec clean -qqq"
+      }
+    ]
+  },
+  "deny-aiusec": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|view_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.agents/scripts/deny-aiusec.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

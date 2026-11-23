@@ -1,0 +1,46 @@
+nushell https://github.com/nushell/nushell
+commit 192e5533546f89eddbb65cc73359aca1598a3076
+version = "0.116.2"
+cloned 2026-11-06 depth 1
+
+prompt https://github.com/starship/starship
+commit 47b4acdc4e6d7aa357177805b7038fc3f75601c2
+version = "1.27.0"
+cloned 2026-11-06 depth 1
+
+line-editor https://github.com/nushell/reedline
+commit b72fd34f54abb15ff50886604a82c22f95642a78
+version = "0.52.1"
+cloned 2026-11-07 depth 1
+
+line-editor main https://github.com/nushell/reedline
+commit c9fcec8a91b034b21fc89fd77aa54a07569ee3c3
+version = "0.52.1"
+cloned 2026-11-07 depth 1
+console/history (atuin): no history copy of https://github.com/atuinsh/atuin tag v18.17.1 commit 6245cc003a01380da6f62284e38cfcc5695e881d (MIT, LICENSE kept)
+console/directory-jump (was zoxide): no history copy of https://github.com/ajeetdsouza/zoxide tag v0.10.0 commit f84f9a3e1d16fabf3e34b199ec7d552993b41f29 (MIT, LICENSE kept)
+
+tree-file-manager https://github.com/Canop/broot
+commit f718d9d762a0de478bbab1f29e7f89a4c2b2d0cd
+version = "1.55.0"
+cloned 2026-11-20 depth 1
+
+git/git-secrets https://github.com/sayanarijit/cottage
+commit 3969bf84d0e692f16008818e20ac0c49cef51e43
+version = "0.9.3"
+cloned 2026-11-22 depth 1
+
+git/git-tui https://github.com/NayJi7/gitoui
+commit 667432fafa1bd08287241c600bcebe7ab64b03f7
+version = "0.5.0"
+cloned 2026-11-22 depth 1
+
+ssh/ssh-manager https://github.com/max-rh/sshelf
+commit ca04b79419e594562b0fd97011f2a06394586ede
+version = "0.16.3"
+cloned 2026-11-22 depth 1
+
+brochure https://github.com/Sylviromi/brochure
+commit 2b7f43f9e28b69599f3749611c334f9ad4d036ce
+version = "0.14.0"
+cloned 2026-11-23 depth 1

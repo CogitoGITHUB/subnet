@@ -1,0 +1,132 @@
+//! `clock_timezones` — world-clock strip. Each configured IANA zone becomes one row.
+//! Parse failures per zone surface as `"??"` so one bad entry doesn't swallow the widget.
+
+use chrono::{DateTime, FixedOffset, Utc};
+use serde::Deserialize;
+
+use crate::fetcher::{FetchContext, RealtimeFetcher, Safety};
+use crate::payload::{Body, EntriesData, Entry, Payload, TextBlockData};
+use crate::render::Shape;
+use crate::samples;
+
+use super::common;
+
+const SHAPES: &[Shape] = &[Shape::TextBlock, Shape::Entries];
+
+pub struct ClockTimezonesFetcher;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Options {
+    #[serde(default)]
+    pub timezones: Vec<TimezoneSpec>,
+}
+
+/// Accept either a plain IANA string (`"Asia/Tokyo"`) or a `{ tz, label }` pair
+/// (`{ tz = "Asia/Tokyo", label = "Tokyo" }`) so templates can show short
+/// city names without pinning every user to the same alias table.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum TimezoneSpec {
+    Plain(String),
+    Named {
+        tz: String,
+        #[serde(default)]
+        label: Option<String>,
+    },
+}
+
+impl TimezoneSpec {
+    fn tz(&self) -> &str {
+        match self {
+            Self::Plain(s) => s,
+            Self::Named { tz, .. } => tz,
+        }
+    }
+    fn label(&self) -> &str {
+        match self {
+            Self::Plain(s) => s,
+            Self::Named { tz, label } => label.as_deref().unwrap_or(tz),
+        }
+    }
+}
+
+impl RealtimeFetcher for ClockTimezonesFetcher {
+    fn name(&self) -> &str {
+        "clock_timezones"
+    }
+    fn safety(&self) -> Safety {
+        Safety::Safe
+    }
+    fn description(&self) -> &'static str {
+        "A world-clock strip showing the current time in each of the configured IANA `timezones`, one row per zone. Use this for at-a-glance multi-region time; pick the base `clock` fetcher for a single local time."
+    }
+    fn shapes(&self) -> &[Shape] {
+        SHAPES
+    }
+    fn sample_body(&self, shape: Shape) -> Option<Body> {
+        Some(match shape {
+            Shape::TextBlock => samples::text_block(&[
+                "UTC         14:35",
+                "Tokyo       23:35",
+                "New York    10:35",
+            ]),
+            Shape::Entries => {
+                samples::entries(&[("UTC", "14:35"), ("Tokyo", "23:35"), ("New York", "10:35")])
+            }
+            _ => return None,
+        })
+    }
+    fn compute(&self, ctx: &FetchContext) -> Payload {
+        let opts: Options = match common::parse_options(ctx.options.as_ref()) {
+            Ok(o) => o,
+            Err(msg) => return common::placeholder(&msg),
+        };
+        let fmt = ctx.format.as_deref().unwrap_or(common::DEFAULT_FORMAT);
+        let locale = ctx.locale.as_deref();
+        let shape = ctx.shape.unwrap_or(Shape::TextBlock);
+        let rows: Vec<(String, String)> = opts
+            .timezones
+            .iter()
+            .map(|spec| {
+                (
+                    spec.label().to_string(),
+                    format_time(spec.tz(), fmt, locale),
+                )
+            })
+            .collect();
+        let body = match shape {
+            Shape::Entries => Body::Entries(EntriesData {
+                items: rows
+                    .into_iter()
+                    .map(|(k, v)| Entry {
+                        key: k,
+                        value: Some(v),
+                        status: None,
+                    })
+                    .collect(),
+            }),
+            _ => Body::TextBlock(TextBlockData {
+                lines: rows.into_iter().map(|(n, t)| format!("{n} {t}")).collect(),
+            }),
+        };
+        Payload {
+            icon: None,
+            status: None,
+            format: None,
+            body,
+        }
+    }
+}
+
+fn format_time(zone: &str, fmt: &str, locale: Option<&str>) -> String {
+    resolve(zone)
+        .map(|dt| common::safe_format_with_locale(&dt, fmt, locale))
+        .unwrap_or_else(|| "??".into())
+}
+
+fn resolve(name: &str) -> Option<DateTime<FixedOffset>> {
+    let tz = common::parse_tz(name)?;
+    Some(Utc::now().with_timezone(&tz).fixed_offset())
+}
+

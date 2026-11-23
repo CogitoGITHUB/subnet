@@ -1,0 +1,42 @@
+{
+  "description": "GitSecrets safety hooks for Codex sessions.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aiusec clean -qqq",
+            "timeout": 30,
+            "statusMessage": "Cleaning decrypted git-secrets secrets"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "aiusec clean -qqq",
+            "timeout": 30,
+            "statusMessage": "Cleaning decrypted git-secrets secrets"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/deny-aiusec.py\"",
+            "timeout": 5,
+            "statusMessage": "Checking git-secrets command policy"
+          }
+        ]
+      }
+    ]
+  }
+}

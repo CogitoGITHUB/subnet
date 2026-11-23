@@ -1,0 +1,42 @@
+[package]
+authors.workspace = true
+description = "Nushell's evaluation engine"
+repository = "https://github.com/nushell/shell/tree/main/crates/console-engine"
+edition.workspace = true
+license.workspace = true
+name = "console-engine"
+rust-version.workspace = true
+autotests = false
+version.workspace = true
+
+[lib]
+bench = false
+harness = false
+
+[lints]
+workspace = true
+
+[dependencies]
+console-protocol.workspace = true
+console-experimental.workspace = true
+console-path.workspace = true
+console-glob.workspace = true
+console-utils.workspace = true
+fancy-regex = { workspace = true }
+log = { workspace = true }
+
+[features]
+default = ["os"]
+os = [
+  "console-protocol/os",
+  "console-test-support/os",
+  "console-utils/os",
+]
+plugin = [
+  "console-protocol/plugin",
+  "os",
+]
+
+[dev-dependencies]
+console-test-support = { path = "../console-test-support" }
+rstest.workspace = true

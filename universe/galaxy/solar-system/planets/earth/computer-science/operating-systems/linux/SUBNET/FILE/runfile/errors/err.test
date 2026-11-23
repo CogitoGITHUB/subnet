@@ -1,6 +1,0 @@
-test mod-err
-level 2
-module ../../FILE/runfile/errors/err.rkt
-call (procedure? make-err)
-expect result equals #t
-expect seconds-under 20

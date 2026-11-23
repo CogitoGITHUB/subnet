@@ -1,0 +1,28 @@
+# Maintainer: NayJi7 <naayji7@gmail.com>
+#
+# AUR package `git-tui-bin`: prebuilt static (musl) release binaries.
+# On every release, bump pkgver, reset pkgrel to 1, update the sha256 values
+# from the release's checksum.txt, then regenerate .SRCINFO with
+# `makepkg --printsrcinfo > .SRCINFO`.
+pkgname=git-tui-bin
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='Terminal Git client with an image-rendered commit graph and GitHub PRs'
+arch=('x86_64' 'aarch64')
+url='https://github.com/NayJi7/gitoui'
+license=('MIT')
+depends=('git')
+provides=('git-tui')
+conflicts=('git-tui')
+options=('!debug')
+source=("LICENSE-${pkgver}::https://raw.githubusercontent.com/NayJi7/gitoui/v${pkgver}/LICENSE")
+source_x86_64=("git-tui-${pkgver}-x86_64.tar.gz::${url}/releases/download/v${pkgver}/git-tui-${pkgver}-x86_64-unknown-linux-musl.tar.gz")
+source_aarch64=("git-tui-${pkgver}-aarch64.tar.gz::${url}/releases/download/v${pkgver}/git-tui-${pkgver}-aarch64-unknown-linux-musl.tar.gz")
+sha256sums=('99d61b26cd4453bbc03103277ebb8ff89f7854eade50dbf20ac68b86c1b2be05')
+sha256sums_x86_64=('ca0cfd634bb3f72e1b8e2b4d28f85fd9c217a3d292ea2dbd066bd844e121b017')
+sha256sums_aarch64=('9edc150957d4ca524cdd0d6f3dacfa690c0e428d549c59819ce7e0f0596a3ac4')
+
+package() {
+  install -Dm755 git-tui "${pkgdir}/usr/bin/git-tui"
+  install -Dm644 "LICENSE-${pkgver}" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

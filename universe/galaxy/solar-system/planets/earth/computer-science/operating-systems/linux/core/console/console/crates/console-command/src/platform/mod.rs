@@ -1,4 +1,6 @@
 mod clear;
+#[cfg(target_os = "linux")]
+mod clear_anim;
 #[cfg(not(target_arch = "wasm32"))]
 mod clip;
 mod dir_info;

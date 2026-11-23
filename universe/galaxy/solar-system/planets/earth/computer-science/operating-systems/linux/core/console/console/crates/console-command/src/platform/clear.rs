@@ -39,6 +39,7 @@ impl Command for Clear {
             )
     }
 
+    #[allow(unreachable_code, unused_variables)]
     fn run(
         &self,
         engine_state: &EngineState,
@@ -47,6 +48,17 @@ impl Command for Clear {
         _input: PipelineData,
     ) -> Result<PipelineData, ShellError> {
         let from_io_error = IoError::factory(call.head, None);
+        let keep = call.has_flag(engine_state, stack, "keep-scrollback")?;
+        #[cfg(target_os = "linux")]
+        {
+            let mut cfg = super::clear_anim::config::Config::default();
+            if let nu_ansi_term::Color::Rgb(r, g, b) = crate::roles::text() {
+                cfg.color = super::clear_anim::config::Rgb(r, g, b);
+            }
+            cfg.clear_scrollback = !keep;
+            super::clear_anim::run(&cfg, None);
+            return Ok(PipelineData::empty());
+        }
         match call.has_flag(engine_state, stack, "keep-scrollback")? {
             true => {
                 std::io::stdout()

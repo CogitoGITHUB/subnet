@@ -9,7 +9,6 @@ use crate::{
     screen::result_item::ResultItem,
 };
 use anyhow::Result;
-use devicons::FileIcon;
 use nucleo::SortStrategy;
 use smallvec::SmallVec;
 
@@ -58,8 +57,7 @@ impl ResultItem for CableEntry {
     }
 
     fn icon(&self) -> Option<&devicons::FileIcon> {
-        // Remote control entries always share the same popcorn icon
-        Some(&CABLE_ICON)
+        None
     }
 
     fn display(&self) -> &str {
@@ -133,11 +131,6 @@ impl RemoteControl {
         self.cable_channels.get_channel(channel_name)
     }
 }
-
-pub const CABLE_ICON: FileIcon = FileIcon {
-    icon: '🍿',
-    color: "#000000",
-};
 
 impl RemoteControl {
     pub fn find(&mut self, pattern: &str) {

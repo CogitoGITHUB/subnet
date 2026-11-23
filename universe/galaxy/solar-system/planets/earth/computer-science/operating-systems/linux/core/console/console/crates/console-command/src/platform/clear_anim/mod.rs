@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Fabian Transchel
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#![allow(dead_code, unused)]
 //! The screen is partitioned between the enabled edges: every cell belongs to
 //! the edge it is (proportionally) closest to, so one edge sweeps the whole
 //! screen, two opposite edges meet on the centre line, and all four meet in an
@@ -9,10 +10,7 @@
 //! all streams are timed to arrive within `duration_ms`. Once every stream has
 //! arrived the whole field fades to black and the terminal is cleared.
 
-#[cfg(not(target_os = "linux"))]
-compile_error!("neoclear supports Linux only");
-
-mod config;
+pub mod config;
 mod term;
 
 use config::{Action, ColorMode, Config, Dir, Rgb};
@@ -22,41 +20,6 @@ use std::time::{Duration, Instant};
 
 const NONE: u32 = u32::MAX;
 
-fn main() {
-    let (action, warnings) = match config::from_args() {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!("neoclear: {e}\nTry 'neoclear --help'.");
-            std::process::exit(2);
-        }
-    };
-    for w in &warnings {
-        eprintln!("neoclear: warning: {w}");
-    }
-    match action {
-        Action::Help => print!("{}", config::HELP),
-        Action::Version => println!("neoclear {}", env!("CARGO_PKG_VERSION")),
-        Action::PrintConfig(cfg) => print!("{}", cfg.to_toml()),
-        Action::ShowPath(p) => match p {
-            Some(p) => println!("{}", p.display()),
-            None => println!("(no config file)"),
-        },
-        Action::WriteConfig(cfg, path) => {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            match std::fs::write(&path, cfg.to_toml()) {
-                Ok(()) => println!("wrote {}", path.display()),
-                Err(e) => {
-                    eprintln!("neoclear: cannot write {}: {e}", path.display());
-                    std::process::exit(1);
-                }
-            }
-        }
-        Action::Run { cfg, size } => run(&cfg, size),
-    }
-}
-
 fn final_clear(cfg: &Config) -> String {
     let mut s = String::from("\x1b[0m\x1b[H\x1b[2J");
     if cfg.clear_scrollback {
@@ -65,7 +28,7 @@ fn final_clear(cfg: &Config) -> String {
     s
 }
 
-fn run(cfg: &Config, forced: Option<(usize, usize)>) {
+pub fn run(cfg: &Config, forced: Option<(usize, usize)>) {
     let mut out = std::io::stdout().lock();
     let size = forced.or_else(|| if term::stdout_is_tty() { term::size() } else { None });
     let Some((w, h)) = size.filter(|&(w, h)| w > 0 && h > 0) else {

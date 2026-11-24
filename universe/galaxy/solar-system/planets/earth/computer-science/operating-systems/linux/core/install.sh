@@ -30,6 +30,11 @@ case "$(uname -m)" in
   *) die "unsupported machine type $(uname -m)" ;;
 esac
 
+if [ -f /etc/alpine-release ]; then
+  say "alpine: installing build tools and Rust with apk"
+  run apk add --no-cache bash build-base curl xz tar gzip git linux-headers openssl-dev zlib-dev sqlite-dev ncurses-dev libffi-dev cargo rust
+fi
+
 say "checking tools"
 missing=""
 for t in cc make tar xz gzip; do command -v "$t" >/dev/null 2>&1 || missing="$missing $t"; done

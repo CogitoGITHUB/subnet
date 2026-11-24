@@ -24,7 +24,7 @@ When the area changes, replace only the lines inside this block.
 Never add steps, results or status here. Never write what was done.
 
 ## The person
-Shape works on a phone (Termux, proot). He is angry about wasted
+Shape works on a phone (Termux+shroot). He is angry about wasted
 tokens. Small moves, small reads. Ask for ALL the code you need in
 ONE read. Short answers, answer first, no preamble, ONE code block
 per answer, lines under 70 columns. Never make him paste many
@@ -49,6 +49,8 @@ times. He may hand you only this file.
   Rust: the build is the check.
 - Never cat big files: tr -d "\033\r" | fold -w 70 | head -c N.
 - Output shown in a terminal must wrap to the screen width.
+- OS: Alpine in shroot (musl). install.sh builds Racket from src.
+- ALWAYS push everything after every change. Nothing behind.
 - Racket only: $HOME/opt/racket-full/bin/racket with env
   LANG=C.UTF-8 LC_ALL=C.UTF-8 PLTCOMPILEDROOTS=$HOME/run-compiled
 - Builds only through the PM, as in SUBNET-OS/PM/HOW-TO-USE.md

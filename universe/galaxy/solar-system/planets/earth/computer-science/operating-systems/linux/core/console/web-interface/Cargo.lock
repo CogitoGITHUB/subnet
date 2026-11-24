@@ -7,7 +7,7 @@ name = "runfile"
 version = "0.1.0"
 
 [[package]]
-name = "website-bridge"
+name = "web-interface-bridge"
 version = "0.1.0"
 dependencies = [
  "runfile",

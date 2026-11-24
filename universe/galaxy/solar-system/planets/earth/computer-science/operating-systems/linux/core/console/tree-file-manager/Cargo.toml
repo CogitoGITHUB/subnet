@@ -40,7 +40,7 @@ flex-grow = "0.1"
 git2 = { version = "0.20", default-features = false } # waiting for a good pure-rust alternative
 glob = "0.3"
 id-arena = "2.2.1"
-image = "=0.25.6" # later versions ask for rust 1.85+
+image = "0.25.10"
 zune-core = "0.4.12"
 zune-image = "0.4.15"
 include_dir = "0.7"

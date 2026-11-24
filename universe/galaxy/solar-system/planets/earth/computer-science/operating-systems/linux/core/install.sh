@@ -77,6 +77,7 @@ export CONSOLE_ECOSYSTEM_ROOT="$ROOT/console"
 SUB="$ROOT/console/entry/entry/subnet.rkt"
 say "compiling the console entry (first run is slow)"
 say "compiling the console entry, installing packages on demand"
+run "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs compiler-lib
 for i in $(seq 1 60); do
   if out=$("$RACKET_DIR/bin/raco" make -j "$JOBS" "$SUB" 2>&1); then
     printf "%s\n" "$out" | tail -3; break

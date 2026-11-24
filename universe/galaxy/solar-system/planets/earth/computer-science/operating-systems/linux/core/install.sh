@@ -74,7 +74,7 @@ export PATH="$CARGO_DIR/bin:$RACKET_DIR/bin:$PATH"
 export PLTCOMPILEDROOTS="$HOME/run-compiled"
 
 export CONSOLE_ECOSYSTEM_ROOT="$ROOT/console"
-SUB="$ROOT/console/entry/entry/subnet.rkt"
+SUB="$ROOT/console/entry/entry/console.rkt"
 say "compiling the console entry (first run is slow)"
 say "compiling the console entry, installing packages on demand"
 run "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs compiler-lib

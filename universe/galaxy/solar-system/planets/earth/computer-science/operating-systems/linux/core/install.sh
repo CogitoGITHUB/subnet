@@ -79,10 +79,10 @@ say "compiling the console entry (first run is slow)"
 say "compiling the console entry, installing packages on demand"
 for i in $(seq 1 60); do
   if out=$("$RACKET_DIR/bin/raco" make -j "$JOBS" "$SUB" 2>&1); then
-    printf "%s\n" "$out" | tail -3 | fold -w 70; break
+    printf "%s\n" "$out" | tail -3; break
   fi
   c=$(printf "%s\n" "$out" | grep "collection:" | head -1 | cut -d "\"" -f2)
-  [ -n "$c" ] || { printf "%s\n" "$out" | tail -15 | fold -w 70; die "compile failed, no missing collection"; }
+  [ -n "$c" ] || { printf "%s\n" "$out" | tail -15; die "compile failed, no missing collection"; }
   say "missing collection: $c, installing"
   "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs "$c" \
     || "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs "$c-lib" \

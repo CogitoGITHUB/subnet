@@ -52,7 +52,7 @@ if [ -x "$RACKET_DIR/bin/racket" ]; then
   say "racket present at $RACKET_DIR"
 else
   say "racket: building $RACKET_VERSION from source (long)"
-  fetch "https://download.racket-lang.org/installers/$RACKET_VERSION/racket-$RACKET_VERSION-src.tgz" "$WORK/racket-src.tgz"
+  fetch "https://download.racket-lang.org/installers/$RACKET_VERSION/racket-minimal-$RACKET_VERSION-src.tgz" "$WORK/racket-src.tgz"
   run tar -xzf "$WORK/racket-src.tgz" -C "$WORK"
   run mkdir -p "$WORK/racket-$RACKET_VERSION/src/build"
   inside "$WORK/racket-$RACKET_VERSION/src/build" ../configure --prefix="$RACKET_DIR"
@@ -76,7 +76,18 @@ export PLTCOMPILEDROOTS="$HOME/run-compiled"
 export CONSOLE_ECOSYSTEM_ROOT="$ROOT/console"
 SUB="$ROOT/console/entry/entry/subnet.rkt"
 say "compiling the console entry (first run is slow)"
-run "$RACKET_DIR/bin/raco" make -j "$JOBS" "$SUB"
+say "compiling the console entry, installing packages on demand"
+for i in $(seq 1 60); do
+  if out=$("$RACKET_DIR/bin/raco" make -j "$JOBS" "$SUB" 2>&1); then
+    printf "%s\n" "$out" | tail -3 | fold -w 70; break
+  fi
+  c=$(printf "%s\n" "$out" | grep "collection:" | head -1 | cut -d "\"" -f2)
+  [ -n "$c" ] || { printf "%s\n" "$out" | tail -15 | fold -w 70; die "compile failed, no missing collection"; }
+  say "missing collection: $c, installing"
+  "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs "$c" \
+    || "$RACKET_DIR/bin/raco" pkg install --auto --skip-installed --no-docs "$c-lib" \
+    || die "cannot install $c"
+done
 say "console installs everything"
 run "$RACKET_DIR/bin/racket" "$SUB" install
 say "done. $WORK holds the downloaded sources and can be deleted"

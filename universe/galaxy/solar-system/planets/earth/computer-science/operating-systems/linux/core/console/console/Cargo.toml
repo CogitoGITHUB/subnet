@@ -521,3 +521,6 @@ bench = false
 
 # Run all benchmarks with `cargo bench`
 # Run individual benchmarks like `cargo bench -- <regex>` e.g. `cargo bench -- parse`
+
+[patch.crates-io]
+fff-notify-debouncer-full = { path = "patches/fff-notify-debouncer-full" }

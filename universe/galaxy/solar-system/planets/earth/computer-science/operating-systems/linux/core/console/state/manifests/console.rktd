@@ -3,6 +3,7 @@
   (name console)
   (version "0.1.0")
   (summary "the RUN console")
+  (homepage "https://github.com/CogitoGITHUB/subnet")
   (source (local "/root/home/shape/subnet/universe/galaxy/solar-system/planets/earth/computer-science/operating-systems/linux/core/console"))
   (build (steps
    (run #:argv ("cargo" "build" "--release"

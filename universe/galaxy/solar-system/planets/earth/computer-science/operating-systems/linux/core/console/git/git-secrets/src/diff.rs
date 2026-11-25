@@ -83,7 +83,7 @@ pub fn diff(proj: &Project, paths: &[PathBuf], options: DiffOptions) -> Result<b
 
                 println!(
                     "{}",
-                    format!("diff --git {} {}", a_path, b_path).bright_black(),
+                    format!("diff --git {} {}", a_path, b_path).dim(),
                 );
 
                 let mut unified_diff = diff.unified_diff();

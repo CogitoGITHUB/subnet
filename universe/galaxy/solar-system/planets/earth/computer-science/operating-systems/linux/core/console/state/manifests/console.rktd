@@ -8,7 +8,7 @@
   (build (steps
    (run #:argv ("cargo" "build" "--release"
      "--target-dir" "target-console" "--manifest-path"
-     "console/Cargo.toml" "-p" "console"))
+     "console/Cargo.toml" "--bin" "console"))
    (run #:argv ("cargo" "build" "--release"
      "--target-dir" "runfile/target" "--manifest-path"
      "runfile/Cargo.toml"))

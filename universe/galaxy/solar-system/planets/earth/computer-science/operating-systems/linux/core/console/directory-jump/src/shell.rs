@@ -33,4 +33,3 @@ make_template!(Tcsh, "tcsh.txt");
 make_template!(Xonsh, "xonsh.txt");
 make_template!(Zsh, "zsh.txt");
 
-#[cfg(feature = "nix-dev")]

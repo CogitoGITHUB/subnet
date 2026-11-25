@@ -84,15 +84,6 @@ pub enum W {
     // Constructed only in non-test builds; under `cfg(test)` we always use `Sink`.
     #[cfg_attr(test, allow(dead_code))]
     Terminal(std::io::BufWriter<std::io::Stderr>),
-    /// Discards all output, used in tests. The second field is the answer to
-    /// give a cursor query, or `None` to refuse one.
-    /// Captures all output into a buffer so tests can assert on the exact
-    /// escape-byte stream the painter emits (not tmux-specific — any
-    /// output-level invariant).
-    /// Fails once after the given number of bytes, then captures later writes.
-    /// Captures like [`W::Capture`], and answers a cursor query from a
-    /// [`TestScreen`] fed on each flush, so the answer reflects what a
-    /// terminal behind a buffered writer has actually received.
 }
 
 impl W {

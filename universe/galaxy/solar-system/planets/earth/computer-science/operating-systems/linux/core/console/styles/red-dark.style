@@ -1,5 +1,5 @@
 name = red
-text = #ffafaf
-dim = #af5f5f
-error = #ffd787
+text = #ff5f5f
+dim = #af0000
+error = #ff0000
 bg = #000000

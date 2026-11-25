@@ -1,0 +1,5 @@
+name = monochrome-light
+text = #000000
+dim = #6e6e6e
+error = #dc2828
+bg = #ffffff

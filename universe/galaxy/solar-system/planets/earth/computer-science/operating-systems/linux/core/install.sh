@@ -6,7 +6,7 @@ OPT="${CONSOLE_OPT:-$HOME/opt}"
 WORK="${CONSOLE_WORK:-$HOME/run-install-work}"
 RACKET_VERSION="${CONSOLE_RACKET_VERSION:-9.3}"
 RUST_VERSION="${CONSOLE_RUST_VERSION:-1.99.0}"
-JOBS="${CONSOLE_JOBS:-2}"
+JOBS="${CONSOLE_JOBS:-4}"
 DRY="${CONSOLE_INSTALL_DRY:-}"
 RACKET_DIR="$OPT/racket-full"
 CARGO_DIR="$HOME/.cargo"
@@ -34,6 +34,16 @@ if [ -f /etc/alpine-release ]; then
   say "alpine: installing build tools and Rust with apk"
   run apk add --no-cache bash build-base curl xz tar gzip git linux-headers openssl-dev zlib-dev sqlite-dev ncurses-dev libffi-dev rustup
   [ -x /root/.cargo/bin/cargo ] || run rustup-init -y --no-modify-path --default-toolchain stable
+fi
+
+if [ -f /etc/alpine-release ]; then
+  command -v taskset >/dev/null 2>&1 && taskset -p ff $$ >/dev/null 2>&1 || true
+  apk add --no-cache sccache >/dev/null 2>&1 || true
+  mkdir -p "$HOME/.cargo" "$HOME/.cache/sccache"
+  { echo "[build]"; echo "jobs = 4"
+    command -v sccache >/dev/null 2>&1 && echo "rustc-wrapper = \"sccache\""
+    echo "[env]"; echo "SCCACHE_DIR = \"$HOME/.cache/sccache\""
+    echo "SCCACHE_CACHE_SIZE = \"20G\""; } > "$HOME/.cargo/config.toml"
 fi
 
 say "checking tools"

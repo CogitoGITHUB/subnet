@@ -5187,8 +5187,6 @@ dependencies = [
 [[package]]
 name = "fff-notify-debouncer-full"
 version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29a4ebea7b8a2840cd59358bbf396f6f04313ce8eae84ac79703ce80298b8731"
 dependencies = [
  "file-id",
  "log",

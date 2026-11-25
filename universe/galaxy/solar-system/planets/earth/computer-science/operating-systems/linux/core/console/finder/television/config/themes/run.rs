@@ -85,7 +85,7 @@ fn pick(k: &str, d: &str) -> ratatui::style::Color {
     let v = get(&m, k);
     match c(&v).or_else(|| c(d)) {
         Some(x) => {
-            let r: ratatui::style::Color = x.into();
+            let r: ratatui::style::Color = (&x).into();
             r
         }
         None => ratatui::style::Color::Reset,

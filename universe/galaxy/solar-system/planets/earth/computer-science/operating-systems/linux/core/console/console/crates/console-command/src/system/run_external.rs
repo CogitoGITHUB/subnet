@@ -828,5 +828,3 @@ fn escape_cmd_argument(arg: &Spanned<OsString>) -> Result<Cow<'_, OsStr>, ShellE
 }
 
 
-/// `prepare_background_command` must detach from the controlling terminal/console
-/// so completer subprocesses cannot rewrite reedline's raw-mode state.

@@ -32,7 +32,8 @@ esac
 
 if [ -f /etc/alpine-release ]; then
   say "alpine: installing build tools and Rust with apk"
-  run apk add --no-cache bash build-base curl xz tar gzip git linux-headers openssl-dev zlib-dev sqlite-dev ncurses-dev libffi-dev cargo rust
+  run apk add --no-cache bash build-base curl xz tar gzip git linux-headers openssl-dev zlib-dev sqlite-dev ncurses-dev libffi-dev rustup
+  [ -x /root/.cargo/bin/cargo ] || run rustup-init -y --no-modify-path --default-toolchain stable
 fi
 
 say "checking tools"
@@ -72,7 +73,6 @@ fi
 
 if [ -f /etc/alpine-release ]; then
   mkdir -p "$CARGO_DIR/bin"
-  for b in cargo rustc rustdoc; do [ -x /usr/bin/$b ] && ln -sf /usr/bin/$b "$CARGO_DIR/bin/$b"; done
 fi
 export PATH="$CARGO_DIR/bin:$RACKET_DIR/bin:$PATH"
 export PLTCOMPILEDROOTS="$HOME/run-compiled"

@@ -163,4 +163,3 @@ pub enum Movement {
     Prev,
 }
 
-#[allow(clippy::doc_overindented_list_items)]

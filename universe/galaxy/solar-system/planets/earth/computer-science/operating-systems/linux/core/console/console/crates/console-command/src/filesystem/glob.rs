@@ -765,5 +765,4 @@ fn run_debug_subcommand(
     }
 }
 
-#[cfg(windows)]
 

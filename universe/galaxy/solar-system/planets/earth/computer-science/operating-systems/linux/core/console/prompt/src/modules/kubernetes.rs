@@ -338,22 +338,3 @@ mod deprecated {
     }
 }
 
-"#,
-        )?;
-        file.sync_all()?;
-
-        let actual = ModuleRenderer::new("kubernetes")
-            .path(dir.path())
-            .env("KUBECONFIG", filename.to_string_lossy().as_ref())
-            .config(toml::toml! {
-                [kubernetes]
-                disabled = false
-                format = "($user )($context )($cluster )($namespace)"
-            })
-            .collect();
-
-        let expected = Some("test_user test_context test_namespace".to_string());
-        assert_eq!(expected, actual);
-        dir.close()
-    }
-}

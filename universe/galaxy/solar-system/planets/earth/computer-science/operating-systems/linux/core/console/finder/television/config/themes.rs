@@ -1,6 +1,6 @@
 
 use crate::screen::colors::{
-    Colorscheme, GeneralColorscheme, HelpColorscheme, InputColorscheme,
+    Colorscheme, GeneralColorscheme, HelpColorscheme, InputColorscheme, ModeColorscheme, PreviewColorscheme, ResultsColorscheme,
 };
 use ratatui::style::Color as RatatuiColor;
 
@@ -221,6 +221,9 @@ impl Into<HelpColorscheme> for &Theme {
 }
 
 #[allow(clippy::from_over_into)]
+impl Into<ResultsColorscheme> for &Theme {
+    fn into(self) -> ResultsColorscheme {
+        ResultsColorscheme {
             result_fg: (&self.result_name_fg).into(),
             result_selected_bg: (&self.selection_bg).into(),
             result_selected_fg: (&self.selection_fg).into(),

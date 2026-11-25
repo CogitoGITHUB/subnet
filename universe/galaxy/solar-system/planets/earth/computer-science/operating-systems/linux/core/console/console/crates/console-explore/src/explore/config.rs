@@ -30,15 +30,15 @@ impl Default for ExploreConfig {
             table: TableConfig::default(),
             selected_cell: color(None, Some(Color::LightBlue)),
             status_info: color(None, None),
-            status_success: color(Some(crate::roles::bg()), Some(crate::roles::text())),
+            status_success: color(Some(crate::roles::nu_bg()), Some(crate::roles::nu_text())),
             status_warn: color(None, None),
-            status_error: color(Some(crate::roles::text()), Some(crate::roles::err())),
+            status_error: color(Some(crate::roles::nu_text()), Some(crate::roles::nu_err())),
             // Use None to inherit from terminal/shell theme
             status_bar_background: color(None, None),
             status_bar_text: color(None, None),
             cmd_bar_text: color(None, None),
             cmd_bar_background: color(None, None),
-            highlight: color(Some(crate::roles::bg()), Some(crate::roles::text())),
+            highlight: color(Some(crate::roles::nu_bg()), Some(crate::roles::nu_text())),
             // Use None to inherit from terminal/shell theme
             title_bar_background: color(None, None),
             title_bar_text: color(None, None),

@@ -100,3 +100,6 @@ pub fn nu_dim() -> nu_ansi_term::Color {
 pub fn nu_err() -> nu_ansi_term::Color {
     nu(err())
 }
+pub fn nu_bg() -> nu_ansi_term::Color {
+    nu(bg())
+}

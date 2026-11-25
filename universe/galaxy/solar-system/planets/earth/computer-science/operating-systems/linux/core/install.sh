@@ -38,7 +38,7 @@ fi
 
 if [ -f /etc/alpine-release ]; then
   command -v taskset >/dev/null 2>&1 && taskset -p ff $$ >/dev/null 2>&1 || true
-  apk add --no-cache sccache >/dev/null 2>&1 || true
+  apk add --no-cache sccache util-linux-misc >/dev/null 2>&1 || true
   mkdir -p "$HOME/.cargo" "$HOME/.cache/sccache"
   { echo "[build]"; echo "jobs = 4"
     command -v sccache >/dev/null 2>&1 && echo "rustc-wrapper = \"sccache\""

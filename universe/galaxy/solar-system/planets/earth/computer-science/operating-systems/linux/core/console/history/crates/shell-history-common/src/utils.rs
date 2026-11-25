@@ -208,4 +208,3 @@ pub fn unquote(s: &str) -> Result<String> {
 
 impl<T: AsRef<str>> Escapable for T {}
 
-#[allow(unsafe_code)]

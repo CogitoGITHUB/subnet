@@ -31,6 +31,5 @@ fn main() {
         }
         // Tango uses dynamic linking, to allow us to dynamically change between two bench suit at runtime.
         // This is currently not supported on non nightly rust, on windows.
-        println!("cargo:rustc-link-arg-benches=-rdynamic");
     }
 }

@@ -93,24 +93,6 @@ impl W {
         W::Terminal(std::io::BufWriter::new(std::io::stderr()))
     }
 
-    /// Writer that discards everything, for tests that exercise painting
-    /// without printing to the terminal.
-
-    /// Like [`W::sink`], but answers a cursor query with `position` rather than
-    /// refusing, so a test can drive the paths that measure the cursor instead
-    /// of only their "no answer" branch.
-
-    /// Writer that buffers everything written to it, so a test can inspect the
-    /// emitted bytes after painting.
-
-    /// Like [`W::capture`], but answering cursor queries from a
-    /// `width` by `height` screen; see [`W::Screen`].
-
-    /// The screen a [`W::screen`] writer answers from, to feed it output that
-    /// did not come from the painter. Panics on any other writer.
-
-    /// Bytes captured so far. Panics unless this is a [`W::capture`] or
-    /// [`W::screen`] writer.
 }
 
 impl Write for W {
@@ -1809,14 +1791,6 @@ impl Painter {
     }
 
 
-    /// Whether the cached anchor is still trusted, so a test can pin which events cost
-    /// a re-verify and which keep #1090's query-free path.
-
-
-    /// What the exit path will reprint after the cursor.
-
-    /// Bytes written so far. Panics unless the painter was built on a
-    /// [`W::capture`] writer.
 }
 
 

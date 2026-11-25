@@ -154,7 +154,7 @@ pub fn parse_directions(s: &str) -> Result<Option<[bool; 4]>, String> {
 }
 
 pub fn directions_string(d: &[bool; 4]) -> String {
-    let v: Vec<&str> = Dir::ALL.iter().zip(d).filter(|(_, &on)| on).map(|(x, _)| x.name()).collect();
+    let v: Vec<&str> = Dir::ALL.iter().zip(d).filter(|&(_, &on)| on).map(|(x, _)| x.name()).collect();
     v.join("+")
 }
 

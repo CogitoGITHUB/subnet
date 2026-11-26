@@ -52,7 +52,7 @@ pub fn format_output(stdout: &[u8], stderr: &[u8], code: Option<i32>) -> Vec<Str
 
 fn sibling_of(path: &std::path::Path) -> Option<PathBuf> {
     let directory = path.parent()?;
-    let sibling = directory.join("shell");
+    let sibling = directory.join("console");
     if sibling.is_file() {
         Some(sibling)
     } else {
@@ -80,7 +80,7 @@ fn shell_binary() -> PathBuf {
             return found;
         }
     }
-    PathBuf::from("shell")
+    PathBuf::from("console")
 }
 
 pub fn run_line(line: &str) -> Vec<String> {

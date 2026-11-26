@@ -208,7 +208,7 @@
                   [(and (equal? (car l) "--target-dir") (pair? (cdr l)))
                    (list* (car l) (path->string target) (loop (cddr l)))]
                   [else (cons (car l) (loop (cdr l)))])))
-        (putenv "CARGO_INCREMENTAL" "1")
+        (putenv "CARGO_INCREMENTAL" "1") (putenv "RUSTC_WRAPPER" "")
         (putenv "CARGO_PROFILE_RELEASE_LTO" "off")
         (putenv "CARGO_PROFILE_RELEASE_CODEGEN_UNITS" "16")
         (putenv "CARGO_PROFILE_RELEASE_DEBUG" "0")

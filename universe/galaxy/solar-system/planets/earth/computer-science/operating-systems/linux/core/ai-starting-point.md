@@ -351,3 +351,24 @@ console history ensure starts it and registers once.
 ## Garbage
 Git branch garbage keeps everything deleted. Snapshot before
 each deletion. Never delete the branch.
+
+## ALPINE BUILD NOTES (verified, console build and install.sh passed)
+
+- Run in Alpine from Termux: shroot exec alpine -- sh -c "..."  (the -- is REQUIRED, without it: shroot: Invalid argument).
+- With GitHub: pass the token with --env GH_TOKEN, then run gh auth setup-git inside before git push.
+- Termux shell is nushell: wrap bash as bash -c, and keep single quotes out of the wrapped text.
+- Alpine is BusyBox: no grep --include, no ls --time-style. perl is not in Termux.
+- /tmp is not writable inside Alpine for some files, so write logs to /root/.cache.
+- Rust: /root/.cargo/bin/cargo (rustup stable, cargo 1.100). Needs the wasm32 target for web-interface: rustup target add wasm32-unknown-unknown.
+- sccache is the rustc-wrapper (cache in /root/.cache/sccache). Never change the cache path. Never run cargo clean.
+- Console build, run from core/console: taskset ff /root/.cargo/bin/cargo build --release --keep-going --target-dir /root/.cache/target-console --manifest-path console/Cargo.toml --bin console. The target dir stays OUTSIDE work/console so it cannot be wiped. A full cold build took about 108 minutes.
+- Install: from core run ./install.sh. Success ends with "== done". The apply log shows FAIL lines with the failing step and stderr.
+- Cargo output uses carriage returns: pipe logs through tr to turn them into newlines before grep.
+
+## KNOWN BUILD PITFALLS
+
+- sqlx 0.9: dynamic SQL must be wrapped in sqlx::AssertSqlSafe(String).
+- Rust 2021 reserves prefixed literals: an identifier directly followed by a quote is an error. Usually a sign of a damaged raw string or test fixture.
+- Orphaned doc comments or attributes with no item after them are a recurring damage pattern. Delete them in place.
+- New cargo rejects cargo:rustc-link-arg-benches when the package has no bench target.
+- All colors come from the console style engine (roles). Never hardcode colors or add a separate theme.

@@ -9,7 +9,7 @@
 (define q-byte 113)
 (define comma-byte 44)
 (define z-byte 122)
-(define jump-pick-bytes (bytes-append (bytes 21) #"let d = (finder jump | str trim); if ($d | is-not-empty) { cd $d }\r"))
+(define jump-pick-bytes (bytes-append (bytes 21) #"let d = (console finder jump | str trim); if ($d | is-not-empty) { cd $d }\r"))
 (define delete-byte 127)
 (define brochure-bytes (bytes-append (bytes 21) #"brochure\r"))
 

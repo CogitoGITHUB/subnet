@@ -228,12 +228,12 @@
           [(not (= rc 0))
            (printf "live: build failed for ~a (exit ~a), the installed version is untouched\n" name rc)
            1]
-          [(not (andmap (lambda (p) (file-exists? (car p))) pairs))
+          [(not (ormap (lambda (p) (file-exists? (car p))) pairs))
            (printf "live: build finished but a binary is missing, the installed version is untouched\n")
            1]
           [else
            (define live (build-path (prefix-dir) name "live"))
-           (for ([p (in-list pairs)])
+           (for ([p (in-list pairs)] #:when (file-exists? (car p)))
              (define link (build-path live (cdr p)))
              (define-values (base file-name must-be-dir) (split-path link))
              (make-directory* base)

@@ -218,7 +218,7 @@ fn menu_lines(width: usize) -> Vec<String> {
         ("move", vec!["t h > between boxes", "d n > command or output"]),
         ("view", vec!["e > expand folded box", "u > tui config", "v > git ui", "r > ssh manager"]),
         ("mark", vec!["s > mark box"]),
-        ("edit", vec!["x > clear input box"]), ("jump", vec!["z > zoxide picker", "Z > add this dir to zoxide"]), ("dev", vec!["m > dev mode on or off, off builds changed", "M > build everything changed"]),
+        ("edit", vec!["x > clear input box"]), ("jump", vec!["z > jump picker", "Z > add this dir to jump"]), ("dev", vec!["m > dev mode on or off, off builds changed", "M > build everything changed"]),
         (
             "copy",
             vec!["c > box", "p > pair", "a > marked", "y > last output", "Y > last pair"],

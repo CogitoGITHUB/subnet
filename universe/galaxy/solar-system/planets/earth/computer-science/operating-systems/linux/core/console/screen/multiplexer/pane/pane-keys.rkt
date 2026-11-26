@@ -9,7 +9,7 @@
 (define q-byte 113)
 (define comma-byte 44)
 (define z-byte 122)
-(define zoxide-pick-bytes (bytes-append (bytes 21) #"let d = (finder zoxide | str trim); if ($d | is-not-empty) { cd $d }\r"))
+(define jump-pick-bytes (bytes-append (bytes 21) #"let d = (finder jump | str trim); if ($d | is-not-empty) { cd $d }\r"))
 (define delete-byte 127)
 (define brochure-bytes (bytes-append (bytes 21) #"brochure\r"))
 
@@ -24,7 +24,7 @@
      (values (bytes) (cond [(= byte 98) (key-state "buffer" (quote none) pinned)] [(= byte 119) (key-state "pane" (quote none) pinned)] [(= byte 112) (key-state "project" (quote none) pinned)] [(= byte 107) (key-state "workspace" (quote none) pinned)] [(= byte 101) (key-state "editor" (quote none) pinned)] [(= byte 115) (key-state "console" (quote none) pinned)] [(= byte 120) (key-state "pane" (quote float) pinned)] [else (key-state "visual" (quote none) (if (= byte space-byte) (not pinned) pinned))]) #f)]
     [(= byte space-byte) (values (bytes) (key-state "visual" (quote space) pinned) #f)]
     [(= byte i-byte) (values (bytes) (key-state "write" (quote none) pinned) #f)]
-    [(= byte z-byte) (values zoxide-pick-bytes state #f)]
+    [(= byte z-byte) (values jump-pick-bytes state #f)]
     [(= byte 98) (values brochure-bytes state #f)]
     [(= byte q-byte) (values (bytes) state #t)]
     [else (values (bytes) state #f)]))

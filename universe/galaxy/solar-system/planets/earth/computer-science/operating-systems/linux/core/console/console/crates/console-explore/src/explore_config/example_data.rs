@@ -827,7 +827,7 @@ pub fn get_example_json() -> Value {
   "hooks": {
     "pre_prompt": [
       "{|| null }",
-      "{||\n  zoxide add -- $env.PWD\n}"
+      "{||\n  console jump add -- $env.PWD\n}"
     ],
     "pre_execution": [
       "{|| null }"

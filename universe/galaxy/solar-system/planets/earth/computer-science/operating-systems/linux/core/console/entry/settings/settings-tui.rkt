@@ -5,7 +5,7 @@
 (define cr (string (integer->char 13)))
 (define nl (string (integer->char 10)))
 (define sp1 (string (integer->char 32)))
-(define cfg-file (build-path "FILE" "runfile" "layouts" "layout-settings.run"))
+(define cfg-file (build-path "runfile" "layouts" "layout-settings.run"))
 (define rows
   (list
    (list "width" "card width" 120 480 8 "240" "width of a card")
